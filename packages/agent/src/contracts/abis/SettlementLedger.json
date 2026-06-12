@@ -1,0 +1,8 @@
+[
+  "function recordSettlement(address payer, address payee, bytes calldata inAmount, bytes calldata inReasonHash) external returns (bytes32)",
+  "function getSettlementHandles(bytes32 id) external view returns (bytes32 amount, bytes32 reasonHash, address payer, address payee, uint256 timestamp)",
+  "function getUserSettlementCount(address user) external view returns (uint256)",
+  "function getUserSettlementId(address user, uint256 index) external view returns (bytes32)",
+  "function settlementCount() external view returns (uint256)",
+  "event SettlementRecorded(bytes32 indexed id, uint256 timestamp)"
+]

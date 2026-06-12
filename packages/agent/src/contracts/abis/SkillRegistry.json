@@ -1,0 +1,50 @@
+[
+  {
+    "inputs": [
+      { "name": "inSkillId", "type": "bytes" },
+      { "name": "inDeveloper", "type": "bytes" },
+      { "name": "inBasePrice", "type": "bytes" },
+      { "name": "inMaxSupply", "type": "bytes" }
+    ],
+    "name": "listSkill",
+    "outputs": [{ "name": "publicIndex", "type": "uint256" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "name": "publicIndex", "type": "uint256" }],
+    "name": "getSkillHandles",
+    "outputs": [
+      {
+        "components": [
+          { "name": "skillId", "type": "bytes32" },
+          { "name": "developer", "type": "bytes32" },
+          { "name": "basePrice", "type": "bytes32" },
+          { "name": "maxSupply", "type": "bytes32" },
+          { "name": "activeUsers", "type": "bytes32" },
+          { "name": "isActive", "type": "bytes32" }
+        ],
+        "name": "h",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "totalSkillsListed",
+    "outputs": [{ "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "publicIndex", "type": "uint256" },
+      { "indexed": false, "name": "listedAt", "type": "uint256" }
+    ],
+    "name": "SkillListed",
+    "type": "event"
+  }
+]

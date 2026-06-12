@@ -1,0 +1,11 @@
+FROM node:18-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY packages/sdk/package.json packages/sdk/
+COPY packages/agent/package.json packages/agent/
+RUN npm ci --workspace=packages/sdk --workspace=packages/agent --ignore-scripts
+COPY packages/sdk packages/sdk
+COPY packages/agent packages/agent
+RUN npm run sdk:build && npm run agent:build
+EXPOSE 3001
+CMD ["node", "packages/agent/dist/index.js"]

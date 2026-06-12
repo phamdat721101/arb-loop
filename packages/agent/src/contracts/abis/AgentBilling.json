@@ -1,0 +1,8 @@
+[
+  "function topUp(address agent, bytes calldata inAmount) external",
+  "function chargeFee(address user, bytes calldata inFee) external returns (bool)",
+  "function getBalanceHandle(address user, address agent) external view returns (bytes32)",
+  "function setPaymentToken(address _token) external",
+  "event TopUp(address indexed user, address indexed agent, uint256 timestamp)",
+  "event FeeCharged(address indexed user, address indexed agent, uint256 timestamp)"
+]

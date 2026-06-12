@@ -1,0 +1,45 @@
+[
+  {
+    "inputs": [
+      { "internalType": "address", "name": "user", "type": "address" },
+      { "internalType": "bytes", "name": "inMemoryHash", "type": "bytes" },
+      { "internalType": "bytes", "name": "inLastInteraction", "type": "bytes" }
+    ],
+    "name": "updateMemory",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "user", "type": "address" }],
+    "name": "getMemoryHandles",
+    "outputs": [
+      {
+        "components": [
+          { "internalType": "uint256", "name": "memoryHash", "type": "uint256" },
+          { "internalType": "uint256", "name": "lastInteraction", "type": "uint256" },
+          { "internalType": "uint256", "name": "interactionCount", "type": "uint256" },
+          { "internalType": "uint256", "name": "memoryTier", "type": "uint256" }
+        ],
+        "internalType": "struct IAIMemoryStore.MemoryHandles",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "agent", "type": "address" }],
+    "name": "setAgent",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [{ "indexed": true, "internalType": "address", "name": "user", "type": "address" }],
+    "name": "MemoryUpdated",
+    "type": "event"
+  }
+]

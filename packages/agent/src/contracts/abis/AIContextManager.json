@@ -1,0 +1,53 @@
+[
+  {
+    "inputs": [
+      { "internalType": "bytes", "name": "inSessionKey", "type": "bytes" },
+      { "internalType": "bytes", "name": "inUserId", "type": "bytes" },
+      { "internalType": "bytes", "name": "inSentimentScore", "type": "bytes" },
+      { "internalType": "bytes", "name": "inTrustLevel", "type": "bytes" },
+      { "internalType": "bytes", "name": "inIsVerified", "type": "bytes" },
+      { "internalType": "bytes", "name": "inAuthorizedAgent", "type": "bytes" }
+    ],
+    "name": "writeContext",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "user", "type": "address" }],
+    "name": "getContextHandles",
+    "outputs": [
+      {
+        "components": [
+          { "internalType": "uint256", "name": "sessionKey", "type": "uint256" },
+          { "internalType": "uint256", "name": "userId", "type": "uint256" },
+          { "internalType": "uint256", "name": "contextVersion", "type": "uint256" },
+          { "internalType": "uint256", "name": "sentimentScore", "type": "uint256" },
+          { "internalType": "uint256", "name": "trustLevel", "type": "uint256" },
+          { "internalType": "uint256", "name": "memoryTier", "type": "uint256" },
+          { "internalType": "uint256", "name": "isActive", "type": "uint256" },
+          { "internalType": "uint256", "name": "isVerified", "type": "uint256" },
+          { "internalType": "uint256", "name": "authorizedAgent", "type": "uint256" }
+        ],
+        "internalType": "struct IAIContextManager.ContextHandles",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "user", "type": "address" }],
+    "name": "conditionalUpgrade",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [{ "indexed": true, "internalType": "address", "name": "user", "type": "address" }],
+    "name": "ContextWritten",
+    "type": "event"
+  }
+]

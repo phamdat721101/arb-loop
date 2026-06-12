@@ -1,0 +1,151 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "AgentRegistry",
+  "sourceName": "contracts/AgentRegistry.sol",
+  "abi": [
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        }
+      ],
+      "name": "AgentAssigned",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        }
+      ],
+      "name": "AgentRegistered",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        }
+      ],
+      "name": "AgentRevoked",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        }
+      ],
+      "name": "assignAgent",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        }
+      ],
+      "name": "isAgentAuthorized",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "agent",
+          "type": "address"
+        }
+      ],
+      "name": "registerAgent",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "registeredAgents",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "revokeAgent",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "userToAgent",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x6080604052348015600e575f5ffd5b506103388061001c5f395ff3fe608060405234801561000f575f5ffd5b5060043610610060575f3560e01c8063306b9bb91461006457806374ee82fc146100795780637961803e146100b0578063a46c792c146100b8578063a7ba27ab146100cb578063d84937fc1461010b575b5f5ffd5b6100776100723660046102b1565b61013a565b005b61009b6100873660046102b1565b5f6020819052908152604090205460ff1681565b60405190151581526020015b60405180910390f35b610077610185565b6100776100c63660046102b1565b6101c9565b6100f36100d93660046102b1565b60016020525f90815260409020546001600160a01b031681565b6040516001600160a01b0390911681526020016100a7565b61009b6101193660046102d1565b6001600160a01b039182165f90815260016020526040902054821691161490565b6001600160a01b0381165f81815260208190526040808220805460ff19166001179055517f82d0829d9d481e4cb9913897f9b9c903271c4db68c7b3324071d2a7e3b2c5ff09190a250565b335f8181526001602052604080822080546001600160a01b0319169055517f1d2ac3af5c639e57ee8f25bc162ea13a1ef8a663c92a4f3e33f126dd2d4feba49190a2565b6001600160a01b0381165f9081526020819052604090205460ff166102405760405162461bcd60e51b815260206004820152602360248201527f4167656e7452656769737472793a206167656e74206e6f7420726567697374656044820152621c995960ea1b606482015260840160405180910390fd5b335f8181526001602052604080822080546001600160a01b0319166001600160a01b03861690811790915590519092917f7629256eb516bdc80342f65a097d4ecf4c301d15115c1d82f4a639c8c505f02491a350565b80356001600160a01b03811681146102ac575f5ffd5b919050565b5f602082840312156102c1575f5ffd5b6102ca82610296565b9392505050565b5f5f604083850312156102e2575f5ffd5b6102eb83610296565b91506102f960208401610296565b9050925092905056fea2646970667358221220cde11859b0674bb2053f0efbf2dd54882445546f9087ed8826a4e3ead1dc081b64736f6c634300081b0033",
+  "deployedBytecode": "0x608060405234801561000f575f5ffd5b5060043610610060575f3560e01c8063306b9bb91461006457806374ee82fc146100795780637961803e146100b0578063a46c792c146100b8578063a7ba27ab146100cb578063d84937fc1461010b575b5f5ffd5b6100776100723660046102b1565b61013a565b005b61009b6100873660046102b1565b5f6020819052908152604090205460ff1681565b60405190151581526020015b60405180910390f35b610077610185565b6100776100c63660046102b1565b6101c9565b6100f36100d93660046102b1565b60016020525f90815260409020546001600160a01b031681565b6040516001600160a01b0390911681526020016100a7565b61009b6101193660046102d1565b6001600160a01b039182165f90815260016020526040902054821691161490565b6001600160a01b0381165f81815260208190526040808220805460ff19166001179055517f82d0829d9d481e4cb9913897f9b9c903271c4db68c7b3324071d2a7e3b2c5ff09190a250565b335f8181526001602052604080822080546001600160a01b0319169055517f1d2ac3af5c639e57ee8f25bc162ea13a1ef8a663c92a4f3e33f126dd2d4feba49190a2565b6001600160a01b0381165f9081526020819052604090205460ff166102405760405162461bcd60e51b815260206004820152602360248201527f4167656e7452656769737472793a206167656e74206e6f7420726567697374656044820152621c995960ea1b606482015260840160405180910390fd5b335f8181526001602052604080822080546001600160a01b0319166001600160a01b03861690811790915590519092917f7629256eb516bdc80342f65a097d4ecf4c301d15115c1d82f4a639c8c505f02491a350565b80356001600160a01b03811681146102ac575f5ffd5b919050565b5f602082840312156102c1575f5ffd5b6102ca82610296565b9392505050565b5f5f604083850312156102e2575f5ffd5b6102eb83610296565b91506102f960208401610296565b9050925092905056fea2646970667358221220cde11859b0674bb2053f0efbf2dd54882445546f9087ed8826a4e3ead1dc081b64736f6c634300081b0033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

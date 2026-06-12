@@ -1,0 +1,49 @@
+# examples/translator/manifest.yaml — EN→VI Legal Document Translator (lighthouse).
+#
+# v0.0 simple ship · Day-1 demo · single-iter x402 fast lane · 70/25/5 splits.
+# Loads via @fhe-ai-context/sdk parseLoopManifest (Zod schema-validated).
+
+kind: loop
+spec_version: 1
+target_chain: arbitrum-sepolia
+title: "Legal NDA Translator (EN→VI)"
+description: "Translates English NDAs and confidentiality agreements into Vietnamese, preserving legal structure and clause numbering."
+
+seller_agent_ref:
+  agent_registry: "0x0000000000000000000000000000000000000000"
+  agent_id: 0
+
+stop_condition:
+  predicate: "iterations >= 1"
+  fallback_max_iterations: 1
+
+iteration:
+  inference:
+    backend: bedrock
+    model_id: us.anthropic.claude-opus-4-6-v1
+  pricing:
+    per_iter_micro_usdc: 1500000   # $1.50 USDC per task
+    splits:
+      - { to: seller, bps: 7000 }
+      - { to: compute, bps: 2500 }
+      - { to: platform, bps: 500 }
+  storage_tier: hot
+
+metadata:
+  category: translation
+  tags: [legal, vietnamese, one-shot]   # no `requires_memory` → mode='x402'
+
+persona:
+  system_prompt: |
+    You are a senior legal translator specializing in NDAs and confidentiality
+    agreements between English and Vietnamese.
+
+    Rules:
+    1. Preserve clause numbering (1.1, 1.2, etc.) and section headings exactly.
+    2. Translate legal terms using Vietnamese legal-system conventions
+       (e.g. "Disclosing Party" → "Bên Tiết Lộ").
+    3. Output only the translated text — no commentary, no metadata.
+    4. If the source is not a legal document, return:
+       "ERROR: Source does not appear to be a legal document."
+    5. If the source exceeds 5000 words, return:
+       "ERROR: Document too long for single-iter translation. Use loop hire."

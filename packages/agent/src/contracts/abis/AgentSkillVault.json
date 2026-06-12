@@ -1,0 +1,50 @@
+[
+  {
+    "inputs": [
+      { "name": "publicSkillIndex", "type": "uint256" },
+      { "name": "inPaymentAmount", "type": "bytes" },
+      { "name": "inAgentOwner", "type": "bytes" },
+      { "name": "licenseDurationSeconds", "type": "uint256" }
+    ],
+    "name": "purchaseSkill",
+    "outputs": [{ "name": "licenseId", "type": "bytes32" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "name": "licenseId", "type": "bytes32" }],
+    "name": "getLicenseHandles",
+    "outputs": [
+      {
+        "components": [
+          { "name": "agentOwner", "type": "bytes32" },
+          { "name": "purchasePrice", "type": "bytes32" },
+          { "name": "isValid", "type": "bytes32" },
+          { "name": "purchasedAt", "type": "uint256" },
+          { "name": "expiresAt", "type": "uint256" }
+        ],
+        "name": "h",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "name": "", "type": "uint256" }],
+    "name": "licenseSaleCount",
+    "outputs": [{ "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "licenseId", "type": "bytes32" },
+      { "indexed": true, "name": "skillIndex", "type": "uint256" },
+      { "indexed": false, "name": "issuedAt", "type": "uint256" }
+    ],
+    "name": "LicenseIssued",
+    "type": "event"
+  }
+]

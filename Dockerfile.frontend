@@ -1,0 +1,11 @@
+FROM node:18-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY packages/sdk/package.json packages/sdk/
+COPY packages/frontend/package.json packages/frontend/
+RUN npm ci --workspace=packages/sdk --workspace=packages/frontend --ignore-scripts
+COPY packages/sdk packages/sdk
+COPY packages/frontend packages/frontend
+RUN npm run sdk:build && npm run frontend:build
+EXPOSE 3000
+CMD ["npm", "run", "frontend:start"]

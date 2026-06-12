@@ -1,0 +1,22 @@
+[
+  {
+    "inputs": [{"internalType": "bytes32", "name": "licenseId", "type": "bytes32"}, {"internalType": "bytes", "name": "inAgentAddress", "type": "bytes"}, {"internalType": "bytes", "name": "inMaxUses", "type": "bytes"}],
+    "name": "grantAgentPermission",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "bytes32", "name": "licenseId", "type": "bytes32"}, {"internalType": "bytes", "name": "inCallingAgent", "type": "bytes"}],
+    "name": "verifyAndConsumePermission",
+    "outputs": [{"internalType": "ebool", "name": "", "type": "uint256"}],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [{"indexed": true, "internalType": "bytes32", "name": "licenseId", "type": "bytes32"}, {"indexed": false, "internalType": "uint256", "name": "grantedAt", "type": "uint256"}],
+    "name": "PermissionGranted",
+    "type": "event"
+  }
+]
