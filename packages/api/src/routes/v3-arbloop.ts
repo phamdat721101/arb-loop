@@ -581,6 +581,46 @@ router.post('/jobs/from-tx', async (req: Request, res: Response) => {
     // 1. Fetch receipt + parse JobCreated.
     const receipt = await provider.getTransactionReceipt(tx_hash);
     if (!receipt) return res.status(404).json({ error: 'tx_not_mined' });
+
+    // Reverted tx → 0 logs and status:0. Replay the call to extract the
+    // actual revert reason (MaxIterTooLarge / AgentRevoked / BudgetExceeded /
+    // …). Without this the buyer sees the generic 'job_created_event_missing'
+    // and has no way to self-diagnose. SOLID — single responsibility added:
+    // surface the upstream cause; route's success path is unchanged below.
+    if (receipt.status === 0) {
+      let detail = 'transaction reverted';
+      let code = '';
+      try {
+        const tx = await provider.getTransaction(tx_hash);
+        if (tx) {
+          await provider.call({ to: tx.to, from: tx.from, data: tx.data, value: tx.value, blockTag: receipt.blockNumber });
+        }
+      } catch (e: any) {
+        // ethers v6 packs the revert selector in e.data (or e.info.error.data).
+        const raw: string =
+          (typeof e?.data === 'string' && e.data)
+          || e?.info?.error?.data
+          || (typeof e?.error?.data === 'string' && e.error.data)
+          || '';
+        if (raw && raw.startsWith('0x') && raw.length >= 10) code = raw.slice(0, 10);
+        // Custom-error selector → human message map (v0.0 LoopJobFactory + LoopJob).
+        const ERRORS: Record<string, string> = {
+          '0x6ecd216f': 'MaxIterTooLarge — your maxIterations exceeds the agent\'s on-chain max_iter_per_job. Reduce maxIter (try 1) or hire a different agent.',
+          '0x6dfd3870': 'AgentRevoked — this agent has been revoked by the seller.',
+          '0x38ba9ea3': 'PricingBelowMin — per-iter price below the seller\'s minimum.',
+          '0x5ec82351': 'NotSeller — only the seller can perform this action.',
+          '0x905e7107': 'AlreadyRevoked — agent was already revoked.',
+          '0x50b2c4e1': 'BudgetExceeded — budget is too small for the requested iterations.',
+          '0x5cd5d233': 'BadSignature — EIP-712 signature did not recover the expected signer.',
+        };
+        detail = (code && ERRORS[code])
+          || e?.reason
+          || e?.shortMessage
+          || (raw ? `revert ${raw.slice(0, 18)}…` : 'execution reverted (unknown custom error)');
+      }
+      return res.status(400).json({ error: 'hire_tx_reverted', detail, selector: code || undefined });
+    }
+
     const factoryAbi = new Interface([
       'event JobCreated(address indexed buyer, address indexed agentRegistryAddr, uint256 indexed agentId, bytes32 manifestEigenKzg, address jobAddress, address jobMemoryNamespace, uint256 budgetMicroUsdc, uint256 maxIterations)',
     ]);
@@ -589,7 +629,7 @@ router.post('/jobs/from-tx', async (req: Request, res: Response) => {
       try { const p = factoryAbi.parseLog(log as never); if (p?.name === 'JobCreated') { evt = p; break; } }
       catch { /* not our event */ }
     }
-    if (!evt) return res.status(404).json({ error: 'job_created_event_missing' });
+    if (!evt) return res.status(404).json({ error: 'job_created_event_missing', detail: `receipt has ${receipt.logs.length} log(s) but none match LoopJobFactory.JobCreated — wrong factory address?` });
 
     const jobAddress = String(evt.args.jobAddress).toLowerCase();
     const buyer = String(evt.args.buyer).toLowerCase();

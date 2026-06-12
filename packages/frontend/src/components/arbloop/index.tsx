@@ -6,7 +6,7 @@
  * hooks/useArbLoop.ts (DI-style: hooks are the data layer).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatUnits, parseUnits } from 'viem';
@@ -17,6 +17,35 @@ import {
   type LoopJobStatusName,
 } from '@/lib/arbloop';
 import { useApproveCheckpoint, useHireLoop } from '@/hooks/useArbLoop';
+
+// ─── File-attach helpers (shared with chat composer pattern) ───────────
+//
+// Text-likes inline their content as labelled task context; binary files
+// inline only metadata so the agent acknowledges + asks for a text export.
+// Same regex/MIME detection as chat/[agentId]/page.tsx — duplication kept
+// short (~25 LOC) instead of cross-package extraction to honour the
+// "essential files only" mandate.
+const TEXTY_EXT_LOOP = /\.(txt|md|markdown|json|ya?ml|xml|csv|tsv|js|ts|tsx|jsx|py|rb|go|java|c|cpp|h|hpp|sh|sql|toml|ini|env|log|html|css|svg|sol|move|rs)$/i;
+function isLikelyTextLoop(f: File): boolean {
+  return f.type.startsWith('text/')
+    || /^application\/(json|xml|yaml|x-yaml|toml|x-toml|javascript|typescript|sql)/.test(f.type)
+    || TEXTY_EXT_LOOP.test(f.name);
+}
+async function readFileAsTaskContext(file: File): Promise<string> {
+  const header = `\n\n--- Attached file: ${file.name} (${file.size} bytes, ${file.type || 'unknown'}) ---\n`;
+  if (!isLikelyTextLoop(file)) {
+    return `${header}[binary content not decoded; ask the user for a text export if needed]\n--- End attached file ---`;
+  }
+  const text = await new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result ?? ''));
+    r.onerror = () => reject(r.error);
+    r.readAsText(file);
+  });
+  const MAX = 60_000;
+  const body = text.length > MAX ? `${text.slice(0, MAX)}\n[…truncated ${text.length - MAX} chars]` : text;
+  return `${header}${body}\n--- End attached file ---`;
+}
 
 // ─── AgentCard ─────────────────────────────────────────────────────────
 
@@ -100,28 +129,42 @@ export function LoopComposer({ agent }: { agent: AgentMetadataDto }) {
   const defaultBudget = (Number(agent.per_iter_default_micro_usdc) * maxIter) / 1e6;
   const [budgetUsdc, setBudgetUsdc] = useState(defaultBudget.toFixed(2));
   const [task, setTask] = useState('');
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [confirming, setConfirming] = useState(false);
   const [confirmErr, setConfirmErr] = useState<string | null>(null);
   const { hire, isPending, error, txHash } = useHireLoop();
 
-  // After the hire tx is mined, ask the API to parse the receipt + run iter 1
-  // synchronously, then redirect to the job tracking page.
+  // After the hire tx is mined, read any attached file → append to task as
+  // labelled context → ask the API to parse the receipt + run iter 1, then
+  // redirect to the job tracking page.
   useEffect(() => {
     if (!txHash) return;
+    let cancelled = false;
     setConfirming(true); setConfirmErr(null);
-    fetch(`${ARBLOOP_API_URL}/v3/arbloop/jobs/from-tx`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tx_hash: txHash, task: task.trim() || undefined }),
-    })
-      .then(async (r) => {
+    (async () => {
+      try {
+        let composedTask = task.trim();
+        if (attachedFile) {
+          try { composedTask = `${composedTask || `Process the attached file: ${attachedFile.name}`}${await readFileAsTaskContext(attachedFile)}`; }
+          catch { /* file unreadable — fall through with bare task */ }
+        }
+        const r = await fetch(`${ARBLOOP_API_URL}/v3/arbloop/jobs/from-tx`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ tx_hash: txHash, task: composedTask || undefined }),
+        });
         const j = await r.json();
         if (!r.ok || !j.job_address) throw new Error(j.error ?? `HTTP ${r.status}`);
-        router.push(`/arbloop/job/${j.job_address}`);
-      })
-      .catch((e) => setConfirmErr(String(e?.message ?? e)))
-      .finally(() => setConfirming(false));
-  }, [txHash, router, task]);
+        if (!cancelled) router.push(`/arbloop/job/${j.job_address}`);
+      } catch (e) {
+        if (!cancelled) setConfirmErr(String((e as Error)?.message ?? e));
+      } finally {
+        if (!cancelled) setConfirming(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [txHash, router, task, attachedFile]);
 
   async function onHire() {
     const budgetMicro = parseUnits(budgetUsdc, 6);
@@ -141,10 +184,46 @@ export function LoopComposer({ agent }: { agent: AgentMetadataDto }) {
           value={task}
           onChange={(e) => setTask(e.target.value)}
           rows={3}
-          placeholder="Describe what the agent should do (optional — agent uses its persona prompt by default)."
+          placeholder="Describe what the agent should do (optional — agent uses its persona prompt by default). Attach a file below for context."
           className="mt-1 w-full resize-y rounded border border-outline-variant/40 bg-surface-container-low px-3 py-2 text-sm"
         />
       </label>
+      <div className="flex items-center gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          onChange={(e) => setAttachedFile(e.target.files?.[0] ?? null)}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isPending || confirming}
+          className="flex items-center gap-1 rounded-full border border-outline-variant/40 px-3 py-1.5 text-xs hover:border-primary/40 hover:text-primary disabled:opacity-50"
+          title="Attach a file (any type) for task context"
+        >
+          <span className="material-symbols-outlined text-[14px]">attach_file</span>
+          {attachedFile ? attachedFile.name : 'Attach context file'}
+        </button>
+        {attachedFile && (
+          <>
+            <span className="font-mono text-[10px] text-on-surface-variant">
+              {(attachedFile.size / 1024).toFixed(1)} kB
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setAttachedFile(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              }}
+              className="ml-auto rounded-full p-1 text-on-surface-variant hover:bg-surface-container hover:text-error"
+              aria-label="Remove attachment"
+            >
+              <span className="material-symbols-outlined text-[14px]">close</span>
+            </button>
+          </>
+        )}
+      </div>
       <label className="block">
         <span className="font-mono text-[10px] uppercase text-on-surface-variant">Max iterations</span>
         <input

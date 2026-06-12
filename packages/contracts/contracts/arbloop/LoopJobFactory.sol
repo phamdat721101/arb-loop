@@ -31,8 +31,7 @@ interface IPermit2 {
 interface IAgentRegistryView {
     struct Agent {
         address seller;
-        bytes32 manifestEigenKzg;
-        bytes32 manifestArweaveTxId;
+        bytes32 manifestIpfsCid;
         string  defaultInferenceBackend;
         string  defaultModelId;
         uint256 perIterMinMicroUsdc;
@@ -143,7 +142,7 @@ contract LoopJobFactory is AccessControl {
             buyer,
             address(agentRegistry),
             agentId,
-            a.manifestEigenKzg,
+            a.manifestIpfsCid,
             jobMemoryNamespace,
             maxIterations,
             budgetMicroUsdc,
@@ -165,7 +164,7 @@ contract LoopJobFactory is AccessControl {
             buyer,
             address(agentRegistry),
             agentId,
-            a.manifestEigenKzg,
+            a.manifestIpfsCid,
             jobAddress,
             jobMemoryNamespace,
             budgetMicroUsdc,

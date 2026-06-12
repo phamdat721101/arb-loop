@@ -31,11 +31,10 @@ export default function StudioPage() {
     if (!userAddress) return;
     setLoading(true);
     // Defensive joined view (PRD-17 §1c): show every agent the connected
-    // wallet owns — both v1 brains (via listMyAgents → /brains/mine) and
-    // v2 marketplace listings (via /v3/marketplace/seller/dashboard). The
-    // dashboard endpoint joins on `agents.seller_id`; the brain list joins
-    // on `brains.owner_address`. Together they catch every ownership path
-    // without an extra schema migration.
+    // wallet owns — v1 brains (via listMyAgents → /brains/mine), v2
+    // marketplace listings (via /v3/marketplace/seller/dashboard), AND
+    // v0.0 loop agents (via /v3/arbloop/agents, filtered by seller_address).
+    // Three keyspaces are unioned without schema migration.
     Promise.all([
       listMyAgents(userAddress),
       fetch(`${AGENT_BACKEND_URL}/v3/marketplace/seller/dashboard`, {
@@ -43,13 +42,11 @@ export default function StudioPage() {
       })
         .then((r) => (r.ok ? r.json() : { agents: [] }))
         .catch(() => ({ agents: [] })),
+      fetch(`${AGENT_BACKEND_URL}/v3/arbloop/agents?limit=200`)
+        .then((r) => (r.ok ? r.json() : { agents: [] }))
+        .catch(() => ({ agents: [] })),
     ])
-      .then(([brainAgents, dash]) => {
-        // Dedupe: brain ids (number) vs agent uuids (string) live in
-        // different keyspaces, so we union directly with no collision.
-        // A v2-published listing exposes both a brain row and an agents
-        // row — listMyAgents already returns the brain side; we fold the
-        // v2-only fields (slug, kind, earnings) onto it where present.
+      .then(([brainAgents, dash, loop]) => {
         const dashAgents = (dash?.agents ?? []) as Array<{
           slug?: string;
           kind?: string;
@@ -61,7 +58,30 @@ export default function StudioPage() {
           const m = a.slug ? dashBySlug.get(a.slug) : undefined;
           return m ? Object.assign({}, a, { _kind: m.kind, _earned: m.earned_total, _calls: m.calls_total }) : a;
         });
-        setAgents(merged);
+
+        // Fold v0.0 loop agents into the same list. Filter by seller_address
+        // (case-insensitive). Synthetic id keeps brain-id and loop-id separate
+        // so React keys don't collide. _kind:'loop' drives row CTA selection.
+        const loopRows = ((loop?.agents ?? []) as Array<{
+          agent_id: number; agent_registry_address: string; agent_registry_version?: number;
+          seller_address: string; title: string; short_description: string | null;
+          tags: string[] | null; mode: string | null; revoked: boolean;
+        }>)
+          .filter((l) => !l.revoked && l.seller_address?.toLowerCase() === userAddress.toLowerCase())
+          .map((l) => ({
+            id: `loop-${l.agent_id}` as unknown as number,
+            title: l.title,
+            description: l.short_description ?? '',
+            slug: null,
+            published: true,
+            tags: l.tags ?? [],
+            ownerAddress: l.seller_address,
+            _kind: 'loop',
+            _loopAgentId: l.agent_id,
+            _loopMode: l.mode ?? 'x402',
+          }) as unknown as Agent);
+
+        setAgents([...loopRows, ...merged]);
       })
       .finally(() => setLoading(false));
   }, [userAddress]);
@@ -114,7 +134,7 @@ export default function StudioPage() {
           </p>
         </div>
         <Link
-          href="/seller/onboard?return=/studio"
+          href="/arbloop/seller/onboard?return=/studio"
           className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-on-primary hover:opacity-90"
         >
           <span className="material-symbols-outlined text-[18px]">rocket_launch</span>
@@ -138,23 +158,46 @@ export default function StudioPage() {
         />
       ) : (
         <>
-          {/* Create-new — unified with /seller/onboard (PRD-17 §1). The studio
-              listing below shows every agent the connected wallet owns, fed
-              by both `listMyAgents` (v1 brains) and the seller dashboard
-              (v2 marketplace listings). */}
+          {/* Create-new — unified entry to BOTH agent kinds. v0.0 primary
+              path is the loop-agent wizard at /arbloop/seller/onboard
+              (gasless EIP-712 publish to AgentRegistryV2, mode-A or mode-B).
+              The legacy brain wizard at /seller/onboard remains for
+              knowledge-Q&A use cases — same `?return=/studio` contract. */}
           <section className="rounded-xl border border-dashed border-outline-variant/30 bg-surface p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="font-headline text-lg font-semibold">Create a new agent</h2>
-                <p className="text-sm text-on-surface-variant">
-                  One human, many agents. Privacy auto-detects from your connected wallet.
+            <div className="space-y-1">
+              <h2 className="font-headline text-lg font-semibold">Create a new agent</h2>
+              <p className="text-sm text-on-surface-variant">
+                Pick the shape that matches what your agent does. You can upgrade a brain to a loop later.
+              </p>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <Link
+                href="/arbloop/seller/onboard?return=/studio"
+                className="group rounded-xl border border-primary/30 bg-primary/5 p-4 transition-colors hover:border-primary/60"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary">all_inclusive</span>
+                  <span className="font-headline text-base font-semibold">Loop agent</span>
+                  <span className="ml-auto rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">v0.0</span>
+                </div>
+                <p className="mt-2 text-xs text-on-surface-variant">
+                  Sells <strong>jobs</strong>: persona + iteration count + budget. Buyers hire and pay
+                  USDC per task or per iter (70% to you). Sign once, $0 gas.
                 </p>
-              </div>
+              </Link>
               <Link
                 href="/seller/onboard?return=/studio"
-                className="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-on-primary hover:opacity-90"
+                className="group rounded-xl border border-outline-variant/30 bg-surface p-4 transition-colors hover:border-secondary/40"
               >
-                Open the publish wizard →
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-secondary">psychology</span>
+                  <span className="font-headline text-base font-semibold">Knowledge brain</span>
+                  <span className="ml-auto rounded-full border border-outline-variant/40 px-2 py-0.5 font-mono text-[10px] text-on-surface-variant">classic</span>
+                </div>
+                <p className="mt-2 text-xs text-on-surface-variant">
+                  Sells <strong>answers</strong>: encrypted knowledge base, paid per query via x402.
+                  Best for static reference data your agent should ground its replies in.
+                </p>
               </Link>
             </div>
           </section>
@@ -177,23 +220,36 @@ export default function StudioPage() {
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            {agents.map((a) => (
+            {agents.map((a) => {
+              const aa = a as unknown as Agent & { _kind?: string; _loopAgentId?: number; _loopMode?: string };
+              const isLoop = aa._kind === 'loop';
+              const detailHref = isLoop ? `/arbloop/agent/${aa._loopAgentId}` : `/studio/${a.id}`;
+              return (
               <div
-                key={a.id}
+                key={String(a.id)}
                 className="encryption-glow flex items-center justify-between gap-3 rounded-xl border border-outline-variant/30 bg-surface p-4"
               >
-                <Link href={`/studio/${a.id}`} className="min-w-0 flex-1">
+                <Link href={detailHref} className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-primary">smart_toy</span>
+                    <span className="material-symbols-outlined text-primary">
+                      {isLoop ? 'all_inclusive' : 'smart_toy'}
+                    </span>
                     <div className="min-w-0">
-                      <div className="truncate font-headline font-semibold">{a.title}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="truncate font-headline font-semibold">{a.title}</div>
+                        {isLoop && (
+                          <span className="rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-primary">
+                            loop · {aa._loopMode}
+                          </span>
+                        )}
+                      </div>
                       <div className="font-mono text-[11px] text-on-surface-variant">
                         {a.published ? '✓ Published' : '🔒 Private draft'}
                       </div>
                     </div>
                   </div>
                 </Link>
-                {a.slug && (
+                {!isLoop && a.slug && (
                   <Link
                     href={`/agent/${a.id}`}
                     target="_blank"
@@ -204,17 +260,37 @@ export default function StudioPage() {
                     public ↗
                   </Link>
                 )}
-                <label className="cursor-pointer rounded-full border border-outline-variant/40 px-3 py-1.5 text-xs text-on-surface-variant transition-colors hover:border-primary/40 hover:text-primary">
-                  Upload
-                  <input
-                    type="file"
-                    accept=".txt,.md,.csv"
-                    onChange={(e) => handleUpload(e, a.id)}
-                    className="hidden"
-                  />
-                </label>
+                {!isLoop && (
+                  <Link
+                    href={`/arbloop/seller/onboard?return=/studio&from_brain=${a.id}&title=${encodeURIComponent(a.title ?? '')}&description=${encodeURIComponent(a.description ?? '')}`}
+                    title="Re-publish this agent as a loop — sells jobs (with iterations + budget), not just answers"
+                    className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider text-primary transition-colors hover:bg-primary/20"
+                  >
+                    ↻ upgrade to loop
+                  </Link>
+                )}
+                {!isLoop && (
+                  <label className="cursor-pointer rounded-full border border-outline-variant/40 px-3 py-1.5 text-xs text-on-surface-variant transition-colors hover:border-primary/40 hover:text-primary">
+                    Upload
+                    <input
+                      type="file"
+                      accept=".txt,.md,.csv"
+                      onChange={(e) => handleUpload(e, a.id as unknown as number)}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+                {isLoop && (
+                  <Link
+                    href={`/arbloop/agent/${aa._loopAgentId}`}
+                    className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider text-primary transition-colors hover:bg-primary/20"
+                  >
+                    open ↗
+                  </Link>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

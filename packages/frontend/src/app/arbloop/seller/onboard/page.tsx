@@ -2,8 +2,7 @@
 /**
  * /arbloop/seller/onboard — v0.0 gasless seller publish.
  *
- * Flow:
- *   1. 1-question wizard (E9 from pre-mortem): "Does your agent need memory?"
+ * Flow: *   1. 1-question wizard (E9 from pre-mortem): "Does your agent need memory?"
  *      → Yes branch sets tags=[requires_memory], maxIter=5, mode='loop'.
  *      → No branch sets maxIter=1, mode='x402'.
  *   2. Title + description + price + persona prompt.
@@ -16,8 +15,8 @@
  * builder come from @fhe-ai-context/sdk.
  */
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { BrowserProvider } from 'ethers';
 import { usePrivyEvmAddress, usePrivyEvmWallet } from '@/hooks/useActiveWallet';
 import {
@@ -30,15 +29,27 @@ import { ARBITRUM_SEPOLIA_CHAIN_ID } from '@/lib/networks';
 
 type Step = 'wizard' | 'fields' | 'review' | 'done';
 
+// Wraps the client form in a Suspense boundary so useSearchParams (used by
+// the Studio "Upgrade to loop" deeplink: ?title=&description=&return=) doesn't
+// trip Next 14's CSR-bailout prerender check. Same pattern as /arbloop/compose.
 export default function SellerOnboard() {
+  return (
+    <Suspense fallback={<p className="py-12 text-center text-on-surface-variant">Loading…</p>}>
+      <SellerOnboardInner />
+    </Suspense>
+  );
+}
+
+function SellerOnboardInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const address = usePrivyEvmAddress();
   const evmWallet = usePrivyEvmWallet();
 
   const [step, setStep] = useState<Step>('wizard');
   const [needsMemory, setNeedsMemory] = useState<boolean | null>(null);
-  const [title, setTitle] = useState('');
-  const [shortDesc, setShortDesc] = useState('');
+  const [title, setTitle] = useState(() => searchParams?.get('title') ?? '');
+  const [shortDesc, setShortDesc] = useState(() => searchParams?.get('description') ?? '');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [perIter, setPerIter] = useState('1.50');
   const [busy, setBusy] = useState(false);
@@ -164,7 +175,7 @@ metadata:
       if (!r.ok) throw new Error(j?.error ?? `HTTP ${r.status}`);
       setResult(j);
       setStep('done');
-      setTimeout(() => router.push(`/arbloop/agent/${j.agent_id}`), 2000);
+      setTimeout(() => router.push(searchParams?.get('return') ?? `/arbloop/agent/${j.agent_id}`), 2000);
     } catch (e) {
       setError((e as Error).message);
     } finally {

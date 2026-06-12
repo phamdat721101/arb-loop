@@ -26,7 +26,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: '/', icon: 'home', label: 'Home' },
   { href: '/marketplace', icon: 'storefront', label: 'Marketplace' },
-  { href: '/arbloop', icon: 'all_inclusive', label: 'arb-loop' },
   { href: '/studio', icon: 'science', label: 'Studio' },
   { href: '/docs', icon: 'menu_book', label: 'Docs', requiresAuth: true },
   { href: '/settings', icon: 'tune', label: 'Settings' },
