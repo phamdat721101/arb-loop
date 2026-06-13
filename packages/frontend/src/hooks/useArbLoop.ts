@@ -58,27 +58,32 @@ export function useDocumentVisibility(): boolean {
 //     after unmount cannot setState on a dead component.
 export function useFetchJson<T>(
   url: string | null,
-  opts: { intervalMs?: number; enabled?: boolean } = {},
+  opts: { intervalMs?: number; enabled?: boolean; headers?: Record<string, string> } = {},
 ): { data: T | null; loading: boolean; error: string | null; refetch: () => void } {
-  const { intervalMs, enabled = true } = opts;
+  const { intervalMs, enabled = true, headers } = opts;
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const visible = useDocumentVisibility();
+  // Stable string key so a freshly-allocated headers object on each render
+  // does not retrigger the fetch effect. The effect captures `headers` via
+  // closure, so the actual request always sees the latest values.
+  const headersKey = JSON.stringify(headers ?? null);
 
   useEffect(() => {
     if (!enabled || !url) return;
     let cancelled = false;
     const ctrl = new AbortController();
     setLoading(true);
-    fetch(url, { signal: ctrl.signal })
+    fetch(url, { signal: ctrl.signal, headers })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((j) => { if (!cancelled) { setData(j as T); setError(null); } })
       .catch((e) => { if (!cancelled && (e as Error).name !== 'AbortError') setError((e as Error).message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; ctrl.abort(); };
-  }, [url, enabled, tick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, enabled, tick, headersKey]);
 
   useEffect(() => {
     if (!enabled || !url || !intervalMs || !visible) return;
@@ -397,10 +402,18 @@ export interface ChangeRequestDto {
 }
 
 export function useChangeRequests(jobAddress: string | null) {
-  const url = jobAddress
+  const { address } = useAccount();
+  // GET /change-requests is auth-gated by the API (x-wallet-address must be
+  // buyer or seller of the job). Don't even attempt the call when no wallet
+  // is connected — the UI shows the empty-state placeholder instead of a
+  // user-hostile "HTTP 401" error.
+  const url = jobAddress && address
     ? `${ARBLOOP_API_URL}/v3/arbloop/jobs/${jobAddress.toLowerCase()}/change-requests`
     : null;
-  const r = useFetchJson<{ requests: ChangeRequestDto[] }>(url, { intervalMs: 10_000 });
+  const r = useFetchJson<{ requests: ChangeRequestDto[] }>(url, {
+    intervalMs: 10_000,
+    headers: address ? { 'x-wallet-address': address } : undefined,
+  });
   return { requests: r.data?.requests ?? [], loading: r.loading, error: r.error, refetch: r.refetch };
 }
 
