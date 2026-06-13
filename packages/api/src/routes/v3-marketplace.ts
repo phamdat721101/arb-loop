@@ -288,39 +288,122 @@ router.get('/seller/dashboard', async (req: AuthRequest, res: Response) => {
   if (!req.user?.address) return res.status(401).json({ error: 'auth required' });
   const owner = req.user.address.toLowerCase();
   const sellerRow = await pool.query(`SELECT id FROM sellers WHERE wallet_address = $1`, [owner]);
-  if (sellerRow.rowCount === 0) return res.json({ seller: null, agents: [], earnings: null });
-  const sellerId = sellerRow.rows[0].id;
+  const sellerId = sellerRow.rowCount > 0 ? sellerRow.rows[0].id : null;
 
-  const [agents, earnings] = await Promise.all([
-    pool.query(
-      `SELECT a.id, a.slug, a.kind, a.domain, a.verification_tier, a.privacy_mode,
-              a.created_at,
-              COALESCE(SUM(pc.amount_usdc), 0)::text AS earned_total,
-              COUNT(pc.id)::int                      AS calls_total
-         FROM agents a
-         LEFT JOIN paid_calls pc ON pc.agent_id = a.id
-        WHERE a.seller_id = $1
-     GROUP BY a.id
-     ORDER BY a.created_at DESC`,
-      [sellerId],
-    ),
-    pool.query(
-      `SELECT
-         COALESCE(SUM(pc.amount_usdc) FILTER (WHERE pc.created_at > now() - interval '7 days'), 0)::text  AS last_7d,
-         COALESCE(SUM(pc.amount_usdc) FILTER (WHERE pc.created_at > now() - interval '30 days'), 0)::text AS last_30d,
-         COALESCE(SUM(pc.amount_usdc), 0)::text                                                            AS all_time,
-         COUNT(*) FILTER (WHERE pc.created_at > now() - interval '7 days')                                 AS calls_7d
-       FROM paid_calls pc
-       JOIN agents a ON a.id = pc.agent_id
-      WHERE a.seller_id = $1`,
-      [sellerId],
-    ),
+  // Run all four queries in parallel so the dashboard renders in ~one
+  // round-trip even when both the legacy (paid_calls) and arb-loop paths
+  // have data. Empty branches return zeros — no extra latency.
+  const legacyAgentsP = sellerId !== null
+    ? pool.query(
+        `SELECT a.id, a.slug, a.kind, a.domain, a.verification_tier, a.privacy_mode,
+                a.created_at,
+                COALESCE(SUM(pc.amount_usdc), 0)::text AS earned_total,
+                COUNT(pc.id)::int                      AS calls_total
+           FROM agents a
+           LEFT JOIN paid_calls pc ON pc.agent_id = a.id
+          WHERE a.seller_id = $1
+       GROUP BY a.id
+       ORDER BY a.created_at DESC`,
+        [sellerId],
+      )
+    : Promise.resolve({ rows: [] as Array<Record<string, unknown>> });
+  const legacyEarningsP = sellerId !== null
+    ? pool.query(
+        `SELECT
+           COALESCE(SUM(pc.amount_usdc) FILTER (WHERE pc.created_at > now() - interval '7 days'), 0)::numeric  AS last_7d,
+           COALESCE(SUM(pc.amount_usdc) FILTER (WHERE pc.created_at > now() - interval '30 days'), 0)::numeric AS last_30d,
+           COALESCE(SUM(pc.amount_usdc), 0)::numeric                                                            AS all_time,
+           COUNT(*) FILTER (WHERE pc.created_at > now() - interval '7 days')::int                               AS calls_7d
+         FROM paid_calls pc
+         JOIN agents a ON a.id = pc.agent_id
+        WHERE a.seller_id = $1`,
+        [sellerId],
+      )
+    : Promise.resolve({ rows: [{ last_7d: 0, last_30d: 0, all_time: 0, calls_7d: 0 }] });
+
+  // Arb-loop earnings — covers BOTH revenue rails (PRD-A x402 fast lane and
+  // PRD-D loop hires) for any wallet that published agents under the new
+  // marketplace, regardless of whether a legacy `sellers` row exists. Sums
+  // are computed in micro-USDC server-side; we divide by 1e6 in TS so the
+  // outgoing shape matches the legacy paid_calls fields.
+  const arbLoopEarningsP = pool.query(
+    `WITH x402 AS (
+       SELECT
+         COALESCE(SUM(seller_cut_micro) FILTER (WHERE settled_at > now() - interval '7 days'), 0)::numeric  AS last_7d,
+         COALESCE(SUM(seller_cut_micro) FILTER (WHERE settled_at > now() - interval '30 days'), 0)::numeric AS last_30d,
+         COALESCE(SUM(seller_cut_micro), 0)::numeric                                                          AS all_time,
+         COUNT(*) FILTER (WHERE settled_at > now() - interval '7 days')::int                                   AS calls_7d
+         FROM arbloop_x402_settlements
+        WHERE LOWER(seller_address) = $1
+     ),
+     iters AS (
+       SELECT
+         COALESCE(SUM((il.amount_paid_micro_usdc::numeric * 7000) / 10000) FILTER (WHERE il.iter_completed_at > now() - interval '7 days'), 0)::numeric  AS last_7d,
+         COALESCE(SUM((il.amount_paid_micro_usdc::numeric * 7000) / 10000) FILTER (WHERE il.iter_completed_at > now() - interval '30 days'), 0)::numeric AS last_30d,
+         COALESCE(SUM((il.amount_paid_micro_usdc::numeric * 7000) / 10000), 0)::numeric                                                                  AS all_time,
+         COUNT(*) FILTER (WHERE il.iter_completed_at > now() - interval '7 days')::int                                                                   AS calls_7d
+         FROM arbloop_iteration_log il
+         JOIN arbloop_jobs_metadata j ON j.job_contract_address = il.job_contract_address
+         JOIN arbloop_agents_metadata a ON a.agent_id = j.agent_id
+          AND (a.agent_registry_address = j.agent_registry_address OR a.agent_registry_address IS NULL)
+        WHERE LOWER(a.seller_address) = $1
+     )
+     SELECT
+       ((SELECT last_7d  FROM x402) + (SELECT last_7d  FROM iters)) AS last_7d_micro,
+       ((SELECT last_30d FROM x402) + (SELECT last_30d FROM iters)) AS last_30d_micro,
+       ((SELECT all_time FROM x402) + (SELECT all_time FROM iters)) AS all_time_micro,
+       ((SELECT calls_7d FROM x402) + (SELECT calls_7d FROM iters))::int AS calls_7d`,
+    [owner],
+  );
+
+  // Arb-loop agents owned by this wallet, with per-agent earnings already
+  // rolled up. Keys collide with legacy `agents.id` (both INT), so we
+  // namespace the id with `arbloop:` so the frontend can use it as a
+  // React key and dedupe correctly.
+  const arbLoopAgentsP = pool.query(
+    `SELECT ('arbloop:' || a.agent_id)::text AS id,
+            a.title                          AS slug,
+            'loop'::text                     AS kind,
+            COALESCE(a.category, '')         AS domain,
+            'verified'::text                 AS verification_tier,
+            'fhe'::text                      AS privacy_mode,
+            a.published_at                   AS created_at,
+            (COALESCE(SUM((il.amount_paid_micro_usdc::numeric * 7000) / 10000), 0) / 1e6)::text AS earned_total,
+            COUNT(il.iter_n)::int            AS calls_total
+       FROM arbloop_agents_metadata a
+       LEFT JOIN arbloop_jobs_metadata j
+         ON j.agent_id = a.agent_id
+        AND (j.agent_registry_address = a.agent_registry_address OR a.agent_registry_address IS NULL)
+       LEFT JOIN arbloop_iteration_log il
+         ON il.job_contract_address = j.job_contract_address
+      WHERE LOWER(a.seller_address) = $1
+        AND a.revoked = FALSE
+   GROUP BY a.agent_id, a.title, a.category, a.published_at
+   ORDER BY a.published_at DESC`,
+    [owner],
+  );
+
+  const [legacyAgents, legacyEarnings, arbLoopEarnings, arbLoopAgents] = await Promise.all([
+    legacyAgentsP, legacyEarningsP, arbLoopEarningsP, arbLoopAgentsP,
   ]);
+
+  // Merge legacy + arb-loop earnings server-side so the frontend is
+  // unchanged — it just sees larger numbers when arb-loop revenue exists.
+  const legacy = legacyEarnings.rows[0] ?? { last_7d: 0, last_30d: 0, all_time: 0, calls_7d: 0 };
+  const arb = arbLoopEarnings.rows[0] ?? { last_7d_micro: 0, last_30d_micro: 0, all_time_micro: 0, calls_7d: 0 };
+  const toUsdc = (legacyVal: unknown, arbMicro: unknown): string =>
+    (Number(legacyVal ?? 0) + Number(arbMicro ?? 0) / 1e6).toFixed(6);
+  const merged = {
+    last_7d:  toUsdc(legacy.last_7d,  arb.last_7d_micro),
+    last_30d: toUsdc(legacy.last_30d, arb.last_30d_micro),
+    all_time: toUsdc(legacy.all_time, arb.all_time_micro),
+    calls_7d: Number(legacy.calls_7d ?? 0) + Number(arb.calls_7d ?? 0),
+  };
 
   res.json({
     seller_id: sellerId,
-    agents: agents.rows,
-    earnings: earnings.rows[0] ?? { last_7d: '0', last_30d: '0', all_time: '0', calls_7d: 0 },
+    agents: [...legacyAgents.rows, ...arbLoopAgents.rows],
+    earnings: merged,
   });
 });
 

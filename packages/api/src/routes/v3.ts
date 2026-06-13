@@ -690,18 +690,90 @@ v3.get('/dashboard/stats', async (_req: Request, res: Response) => {
            (SELECT COUNT(*)::int FROM cognitive_reflective WHERE published = true)              AS reflective_published,
            (SELECT COUNT(*)::int FROM cognitive_workflow_runs)                                  AS workflow_runs_total,
            (SELECT COUNT(*)::int FROM cognitive_workflow_runs WHERE created_at >= now() - interval '24 hours') AS workflow_runs_24h,
-           (SELECT COALESCE(SUM(amount_usdc), 0)::numeric(20,6) FROM paid_calls)                AS total_usdc_routed,
-           (SELECT COALESCE(SUM(amount_usdc), 0)::numeric(20,6) FROM paid_calls WHERE created_at >= now() - interval '24 hours') AS usdc_routed_24h`,
+           -- USDC routed across BOTH revenue rails:
+           --   1. legacy paid_calls (brain Q&A, marketplace v1)
+           --   2. arb-loop x402 fast-lane settlements (mode A)
+           --   3. arb-loop iteration log (mode B loop hires)
+           -- Numerator is in USDC for paid_calls, micro-USDC for arb-loop —
+           -- divide arb-loop by 1e6 inside the SUM so the unit is USDC.
+           (
+             (SELECT COALESCE(SUM(amount_usdc), 0)::numeric FROM paid_calls)
+             + (SELECT COALESCE(SUM(amount_micro_usdc) / 1e6, 0)::numeric FROM arbloop_x402_settlements)
+             + (SELECT COALESCE(SUM(amount_paid_micro_usdc) / 1e6, 0)::numeric FROM arbloop_iteration_log)
+           )::numeric(20,6) AS total_usdc_routed,
+           (
+             (SELECT COALESCE(SUM(amount_usdc), 0)::numeric FROM paid_calls
+                WHERE created_at >= now() - interval '24 hours')
+             + (SELECT COALESCE(SUM(amount_micro_usdc) / 1e6, 0)::numeric FROM arbloop_x402_settlements
+                WHERE settled_at >= now() - interval '24 hours')
+             + (SELECT COALESCE(SUM(amount_paid_micro_usdc) / 1e6, 0)::numeric FROM arbloop_iteration_log
+                WHERE iter_completed_at >= now() - interval '24 hours')
+           )::numeric(20,6) AS usdc_routed_24h`,
       ),
+      // Top sellers across both rails. Legacy + arb-loop x402 + arb-loop
+      // iters merged via UNION ALL, then re-grouped. Numbers are in USDC.
       pool.query(
-        `SELECT a.owner_address AS seller, SUM(pc.amount_usdc)::numeric(20,6) AS earned, COUNT(pc.id)::int AS calls
-           FROM paid_calls pc JOIN agents a ON a.id = pc.agent_id
-          GROUP BY a.owner_address
-          ORDER BY earned DESC LIMIT 10`,
+        `WITH per_wallet AS (
+           SELECT a.owner_address           AS seller,
+                  pc.amount_usdc::numeric    AS earned,
+                  1                          AS calls
+             FROM paid_calls pc JOIN agents a ON a.id = pc.agent_id
+           UNION ALL
+           SELECT seller_address              AS seller,
+                  seller_cut_micro / 1e6      AS earned,
+                  1                            AS calls
+             FROM arbloop_x402_settlements
+           UNION ALL
+           SELECT a.seller_address                              AS seller,
+                  (il.amount_paid_micro_usdc::numeric * 7000) / 10000 / 1e6 AS earned,
+                  1                                              AS calls
+             FROM arbloop_iteration_log il
+             JOIN arbloop_jobs_metadata j ON j.job_contract_address = il.job_contract_address
+             JOIN arbloop_agents_metadata a ON a.agent_id = j.agent_id
+              AND (a.agent_registry_address = j.agent_registry_address OR a.agent_registry_address IS NULL)
+         )
+         SELECT seller,
+                SUM(earned)::numeric(20,6) AS earned,
+                SUM(calls)::int             AS calls
+           FROM per_wallet
+          WHERE seller IS NOT NULL
+       GROUP BY seller
+       ORDER BY earned DESC LIMIT 10`,
       ),
+      // Recent receipts across both rails — UNION ALL with a `kind` discriminator
+      // so the frontend can label each row. Limit 20 newest.
       pool.query(
-        `SELECT slug, buyer, amount_usdc, tx_hash, network, method, created_at
-           FROM paid_calls ORDER BY created_at DESC LIMIT 20`,
+        `(SELECT 'paid_call'::text          AS kind,
+                 slug                        AS slug,
+                 buyer                       AS buyer,
+                 amount_usdc::numeric        AS amount_usdc,
+                 tx_hash                     AS tx_hash,
+                 network                     AS network,
+                 method                      AS method,
+                 created_at                  AS created_at
+            FROM paid_calls)
+         UNION ALL
+         (SELECT 'arbloop_x402'::text        AS kind,
+                 ('arb-agent:' || agent_id)::text AS slug,
+                 payer_address               AS buyer,
+                 (amount_micro_usdc / 1e6)::numeric AS amount_usdc,
+                 tx_hash                     AS tx_hash,
+                 'arbitrum-sepolia'::text    AS network,
+                 'x402'::text                AS method,
+                 settled_at                  AS created_at
+            FROM arbloop_x402_settlements)
+         UNION ALL
+         (SELECT 'arbloop_iter'::text        AS kind,
+                 ('arb-job:' || il.job_contract_address)::text AS slug,
+                 j.buyer_address             AS buyer,
+                 (il.amount_paid_micro_usdc / 1e6)::numeric AS amount_usdc,
+                 il.x402_settlement_tx       AS tx_hash,
+                 'arbitrum-sepolia'::text    AS network,
+                 il.inference_backend        AS method,
+                 il.iter_completed_at        AS created_at
+            FROM arbloop_iteration_log il
+            JOIN arbloop_jobs_metadata j ON j.job_contract_address = il.job_contract_address)
+         ORDER BY created_at DESC NULLS LAST LIMIT 20`,
       ),
       // Tatum WAL price feed removed (Arbitrum-only). Use static fallback.
       Promise.resolve(null),
