@@ -51,6 +51,7 @@
     "smoke:arbloop-fhe": "tsx scripts/smoke-arbloop-fhe.ts",
     "smoke:arbloop-permit2-hire": "tsx scripts/smoke-arbloop-permit2-hire.ts",
     "smoke:arbloop-translation": "tsx scripts/smoke-arbloop-translation.ts",
+    "smoke:arbloop-responsive": "bash scripts/smoke-arbloop-responsive.sh",
     "seed:translator": "tsx scripts/seed-translator-agent.ts",
     "deploy:arbloop": "npx hardhat run packages/contracts/scripts/deploy-arbloop.ts --config packages/contracts/hardhat.config.ts --network arbitrumSepolia",
     "demo:agentic-market": "tsx scripts/demo-agentic-market.ts",

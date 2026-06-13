@@ -100,6 +100,7 @@ cat <<EOF
    • smoke:arbloop-fhe              (PRD-B — Fhenix encrypt/decrypt + Pinata roundtrip)
    • smoke:arbloop-permit2-hire     (PRD-D — single-popup loop hire, fixes Drift #1)
    • smoke:arbloop-translation      (PRD-G — full chat → 1 sig → translated PDF in <120s)
+   • smoke:arbloop-responsive       (Studio buyer/seller tabs — viewport + tap-target QA)
 EOF
 
 printf "\n${color_green}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${color_reset}\n"

@@ -164,6 +164,146 @@ router.get('/jobs/:address/memory/:level', async (req: Request, res: Response) =
   }
 });
 
+// ─── GET /v3/arbloop/buyer/:address/jobs ─────────────────────────────────
+//
+// Studio buyer portfolio: every loop the wallet has hired, newest first.
+// One indexed scan on arbloop_jobs_metadata + a LATERAL join for the most
+// recent iter row (latency proxy + last-seen backend). Address is lowercased
+// to match the storage convention used by every other job route.
+router.get('/buyer/:address/jobs', async (req: Request, res: Response) => {
+  try {
+    const buyer = String(req.params.address ?? '').toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(buyer)) {
+      return res.status(400).json({ error: 'bad_address' });
+    }
+    const limit = Math.min(parseInt(String(req.query.limit ?? '50'), 10) || 50, 200);
+    const r = await pool.query(
+      `SELECT j.job_contract_address,
+              j.agent_id,
+              j.agent_registry_address,
+              j.status,
+              j.iterations_done,
+              j.max_iterations,
+              j.spent_micro_usdc,
+              j.budget_micro_usdc,
+              j.created_at,
+              j.last_iter_at,
+              j.completed_at,
+              a.title              AS agent_title,
+              a.short_description  AS agent_short_description,
+              latest.inference_backend AS last_backend,
+              latest.iter_completed_at AS last_iter_completed_at
+         FROM arbloop_jobs_metadata j
+         LEFT JOIN arbloop_agents_metadata a
+                ON a.agent_id = j.agent_id
+               AND (a.agent_registry_address = j.agent_registry_address
+                    OR a.agent_registry_address IS NULL)
+         LEFT JOIN LATERAL (
+              SELECT inference_backend, iter_completed_at
+                FROM arbloop_iteration_log il
+               WHERE il.job_contract_address = j.job_contract_address
+               ORDER BY iter_n DESC LIMIT 1
+         ) latest ON TRUE
+        WHERE LOWER(j.buyer_address) = $1
+        ORDER BY j.created_at DESC
+        LIMIT $2`,
+      [buyer, limit],
+    );
+    res.json({ jobs: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: 'buyer_jobs_failed', detail: String(e) });
+  }
+});
+
+// ─── /v3/arbloop/jobs/:address/change-requests (GET, POST) ───────────────
+//
+// Off-chain message thread bound to a job. Auth model: caller proves a
+// wallet via `x-wallet-address` (same lightweight pattern the seller
+// dashboard uses). The route loads the job's buyer/seller from
+// arbloop_jobs_metadata + arbloop_agents_metadata; the caller must be one
+// of them, else 403. Direction is derived server-side — clients cannot
+// spoof it. Body is server-validated to ≤2000 chars (the migration's
+// CHECK is the second line of defence).
+function lower(x: unknown): string {
+  return typeof x === 'string' ? x.toLowerCase() : '';
+}
+
+async function loadJobParticipants(
+  jobAddress: string,
+): Promise<{ buyer: string; seller: string } | null> {
+  const r = await pool.query(
+    `SELECT j.buyer_address, a.seller_address
+       FROM arbloop_jobs_metadata j
+       LEFT JOIN arbloop_agents_metadata a
+              ON a.agent_id = j.agent_id
+             AND (a.agent_registry_address = j.agent_registry_address
+                  OR a.agent_registry_address IS NULL)
+      WHERE j.job_contract_address = $1
+      LIMIT 1`,
+    [jobAddress],
+  );
+  if (r.rowCount === 0) return null;
+  const row = r.rows[0];
+  if (!row.buyer_address || !row.seller_address) return null;
+  return { buyer: lower(row.buyer_address), seller: lower(row.seller_address) };
+}
+
+router.get('/jobs/:address/change-requests', async (req: Request, res: Response) => {
+  try {
+    const job = lower(req.params.address);
+    if (!/^0x[0-9a-f]{40}$/.test(job)) return res.status(400).json({ error: 'bad_address' });
+    const caller = lower(req.header('x-wallet-address'));
+    if (!/^0x[0-9a-f]{40}$/.test(caller)) return res.status(401).json({ error: 'missing_wallet' });
+    const parts = await loadJobParticipants(job);
+    if (!parts) return res.status(404).json({ error: 'job_not_found' });
+    if (caller !== parts.buyer && caller !== parts.seller) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const r = await pool.query(
+      `SELECT id, job_contract_address, body, direction, sender_address, created_at
+         FROM arbloop_change_requests
+        WHERE job_contract_address = $1
+        ORDER BY created_at ASC
+        LIMIT 200`,
+      [job],
+    );
+    res.json({ requests: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: 'change_requests_get_failed', detail: String(e) });
+  }
+});
+
+router.post('/jobs/:address/change-requests', async (req: Request, res: Response) => {
+  try {
+    const job = lower(req.params.address);
+    if (!/^0x[0-9a-f]{40}$/.test(job)) return res.status(400).json({ error: 'bad_address' });
+    const caller = lower(req.header('x-wallet-address'));
+    if (!/^0x[0-9a-f]{40}$/.test(caller)) return res.status(401).json({ error: 'missing_wallet' });
+    const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+    if (!body) return res.status(400).json({ error: 'empty_body' });
+    if (body.length > 2000) return res.status(400).json({ error: 'body_too_long' });
+
+    const parts = await loadJobParticipants(job);
+    if (!parts) return res.status(404).json({ error: 'job_not_found' });
+
+    let direction: 'buyer_to_seller' | 'seller_to_buyer';
+    if (caller === parts.buyer) direction = 'buyer_to_seller';
+    else if (caller === parts.seller) direction = 'seller_to_buyer';
+    else return res.status(403).json({ error: 'forbidden' });
+
+    const r = await pool.query(
+      `INSERT INTO arbloop_change_requests
+         (job_contract_address, buyer_address, seller_address, sender_address, direction, body)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, job_contract_address, body, direction, sender_address, created_at`,
+      [job, parts.buyer, parts.seller, caller, direction, body],
+    );
+    res.status(201).json({ request: r.rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: 'change_request_post_failed', detail: String(e) });
+  }
+});
+
 // ─── POST /v3/arbloop/agents/publish ─────────────────────────────────────
 // Seller submits manifest YAML + metadata; relayer uploads to mock EigenDA
 // and calls AgentRegistry.publishAgent on-chain. Seller pays no gas.

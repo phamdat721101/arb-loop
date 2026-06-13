@@ -1,14 +1,32 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { usePrivy } from '@privy-io/react-auth';
 import { listMyAgents, type Agent } from '@/lib/agents';
 import { usePermit } from '@/hooks/usePermit';
 import { PermitManager } from '@/components/PermitManager';
 import { AGENT_BACKEND_URL } from '@/lib/contracts';
 import { useActiveWallet } from '@/hooks/useActiveWallet';
+import { BuyerPortfolio } from '@/components/arbloop';
 
+/**
+ * Studio page — wraps the inner component in <Suspense> so Next.js can
+ * statically generate the route. `useSearchParams()` requires a Suspense
+ * boundary at the route level (next 14+ CSR bailout rule). Same convention
+ * as /arbloop/compose and /arbloop/seller/onboard.
+ *
+ * SOLID: single-responsibility wrapper; all state + render lives in StudioInner.
+ */
 export default function StudioPage() {
+  return (
+    <Suspense fallback={<p className="py-12 text-center text-on-surface-variant">Loading…</p>}>
+      <StudioInner />
+    </Suspense>
+  );
+}
+
+function StudioInner() {
   const { authenticated, ready, login } = usePrivy();
   const { address } = useActiveWallet();
   const userAddress = address as `0x${string}` | undefined;
@@ -26,6 +44,32 @@ export default function StudioPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
+
+  // ─── Role tabs ──────────────────────────────────────────────────────
+  // URL is the source of truth (?role=buyer|seller). On first paint we
+  // honour an explicit URL choice; otherwise we fall back to seller and,
+  // once the agent list has loaded, switch to buyer for empty-list wallets.
+  // The URL is kept in sync via router.replace (no scroll) so the tab is
+  // bookmarkable and back-button-friendly.
+  const search = useSearchParams();
+  const router = useRouter();
+  const urlRole = search.get('role');
+  const [role, setRole] = useState<'buyer' | 'seller'>(
+    urlRole === 'buyer' || urlRole === 'seller' ? urlRole : 'seller',
+  );
+  const decidedDefault = useRef(false);
+  useEffect(() => {
+    if (urlRole) return;
+    if (decidedDefault.current || loading) return;
+    decidedDefault.current = true;
+    if (agents.length === 0 && userAddress) setRole('buyer');
+  }, [loading, agents.length, urlRole, userAddress]);
+  useEffect(() => {
+    if (urlRole === role) return;
+    const sp = new URLSearchParams(search.toString());
+    sp.set('role', role);
+    router.replace(`/studio?${sp.toString()}`, { scroll: false });
+  }, [role, urlRole, router, search]);
 
   useEffect(() => {
     if (!userAddress) return;
@@ -125,22 +169,57 @@ export default function StudioPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-2">
           <h1 className="font-headline text-3xl font-bold">Studio</h1>
           <p className="text-on-surface-variant">
-            Train, manage, and publish your encrypted AI agents.
+            {role === 'buyer'
+              ? 'Track every loop you have hired. Pause, resume, cancel, or send a change request.'
+              : 'Train, manage, and publish your encrypted AI agents.'}
           </p>
         </div>
-        <Link
-          href="/arbloop/seller/onboard?return=/studio"
-          className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-on-primary hover:opacity-90"
-        >
-          <span className="material-symbols-outlined text-[18px]">rocket_launch</span>
-          + New agent
-        </Link>
-      </div>
+        {role === 'seller' && (
+          <Link
+            href="/arbloop/seller/onboard?return=/studio"
+            className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-on-primary hover:opacity-90"
+            style={{ minHeight: 44 }}
+          >
+            <span className="material-symbols-outlined text-[18px]">rocket_launch</span>
+            + New agent
+          </Link>
+        )}
+      </header>
+
+      <nav
+        role="tablist"
+        aria-label="Studio role"
+        data-test="studio-tabs"
+        className="sticky top-0 z-10 flex gap-2 border-b border-outline-variant/20 bg-background/95 py-2 backdrop-blur"
+      >
+        {(['buyer', 'seller'] as const).map((r) => (
+          <button
+            key={r}
+            role="tab"
+            aria-selected={role === r}
+            data-test={`studio-tab-${r}`}
+            onClick={() => setRole(r)}
+            className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors sm:flex-initial ${
+              role === r
+                ? 'bg-primary/15 text-primary'
+                : 'text-on-surface-variant hover:bg-surface-container-low'
+            }`}
+            style={{ minHeight: 44 }}
+          >
+            {r === 'buyer' ? 'My loops' : 'My agents'}
+          </button>
+        ))}
+      </nav>
+
+      {role === 'buyer' ? (
+        <BuyerPortfolio buyerAddress={userAddress} />
+      ) : (
+        <>
       <EarningsTile userAddress={userAddress} agents={agents} />
 
       {!hasPermit ? (
@@ -294,6 +373,8 @@ export default function StudioPage() {
           </div>
         )}
       </section>
+        </>
+      )}
         </>
       )}
     </div>

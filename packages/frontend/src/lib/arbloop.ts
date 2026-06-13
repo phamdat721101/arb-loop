@@ -85,6 +85,9 @@ export const LOOP_JOB_ABI = [
   { type: 'function', name: 'budgetMicroUsdc', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'agentId', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'latestAttestationUid', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'pause', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { type: 'function', name: 'resume', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { type: 'function', name: 'cancel', stateMutability: 'nonpayable', inputs: [], outputs: [] },
 ] as const;
 
 export const CHECKPOINT_APPROVAL_ABI = [
@@ -152,6 +155,24 @@ export interface JobMetadataDto {
   created_at: string;
   last_iter_at: string | null;
   completed_at: string | null;
+}
+
+export interface BuyerJobDto {
+  job_contract_address: string;
+  agent_id: number;
+  agent_registry_address: string;
+  status: number;
+  iterations_done: number;
+  max_iterations: number;
+  spent_micro_usdc: string;
+  budget_micro_usdc: string;
+  created_at: string;
+  last_iter_at: string | null;
+  completed_at: string | null;
+  agent_title: string | null;
+  agent_short_description: string | null;
+  last_backend: string | null;
+  last_iter_completed_at: string | null;
 }
 
 export interface IterationLogDto {

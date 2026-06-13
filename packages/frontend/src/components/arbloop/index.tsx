@@ -449,3 +449,348 @@ export function MemoryTraceViewer({ jobAddress }: { jobAddress: string }) {
     </div>
   );
 }
+
+// ─── BuyerPortfolio ────────────────────────────────────────────────────
+//
+// Studio Buyer tab. One component, two render branches: card list (<sm)
+// and table (>=sm). Same rows in both — Tailwind toggles visibility, no
+// JS resize listener. Polls every 5s while any job is RUNNING, every 30s
+// otherwise. useFetchJson skips polls on hidden tabs.
+
+import {
+  useBuyerJobs,
+  usePauseJob,
+  useResumeJob,
+  useCancelJob,
+  useChangeRequests,
+  useSendChangeRequest,
+  type ChangeRequestDto,
+} from '@/hooks/useArbLoop';
+import { LOOP_JOB_STATUS, type BuyerJobDto } from '@/lib/arbloop';
+
+const STATUS_TINT: Record<string, string> = {
+  PENDING: 'bg-surface-container-low text-on-surface-variant',
+  RUNNING: 'bg-primary/10 text-primary',
+  PAUSED_BUDGET: 'bg-amber-500/10 text-amber-500',
+  PAUSED_CHECKPOINT: 'bg-tertiary/10 text-tertiary',
+  DONE: 'bg-secondary/10 text-secondary',
+  CANCELLED: 'bg-error/10 text-error',
+};
+
+function fmtUsdc(micro: string | bigint | undefined): string {
+  if (micro === undefined || micro === null) return '0.00';
+  try { return formatUnits(BigInt(micro), 6); } catch { return '0.00'; }
+}
+
+function relTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso).getTime();
+  const diff = Date.now() - d;
+  if (diff < 60_000) return 'just now';
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+export function BuyerPortfolio({ buyerAddress }: { buyerAddress: `0x${string}` | null | undefined }) {
+  const anyRunning = (rows: BuyerJobDto[]) =>
+    rows.some((j) => LOOP_JOB_STATUS[j.status] === 'RUNNING');
+  // Two-pass cadence: start fast, slow down once we know there are no
+  // running rows. The hook re-renders on rows change; cadence updates.
+  const fast = 5_000;
+  const slow = 30_000;
+  // Initial render uses fast cadence to avoid a 30s wait on first paint.
+  const probe = useBuyerJobs(buyerAddress, fast);
+  const intervalMs = anyRunning(probe.jobs) ? fast : slow;
+  const { jobs, loading, error } = useBuyerJobs(buyerAddress, intervalMs);
+
+  if (!buyerAddress) {
+    return (
+      <div className="rounded-xl border border-dashed border-outline-variant/40 bg-surface-container-low p-8 text-center">
+        <p className="text-on-surface-variant">Connect a wallet to see your hired loops.</p>
+      </div>
+    );
+  }
+  if (loading && jobs.length === 0) {
+    return <p className="py-12 text-center text-on-surface-variant">Loading your loops…</p>;
+  }
+  if (error) {
+    return <p className="py-8 text-center text-amber-500">Could not load: {error}</p>;
+  }
+  if (jobs.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-outline-variant/40 bg-surface-container-low p-10 text-center">
+        <p className="text-on-surface-variant">You haven&apos;t hired a loop yet.</p>
+        <p className="mt-2 text-xs text-on-surface-variant">
+          Browse the <Link href="/arbloop/marketplace" className="text-primary hover:underline">marketplace</Link>{' '}
+          or describe what you need on the <Link href="/" className="text-primary hover:underline">home page</Link>.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div data-test="buyer-portfolio">
+      {/* Mobile: card list (<sm) */}
+      <ul data-test="buyer-portfolio-card-list" className="space-y-3 sm:hidden">
+        {jobs.map((j) => <BuyerJobCard key={j.job_contract_address} j={j} />)}
+      </ul>
+      {/* Desktop: table (≥sm) */}
+      <div data-test="buyer-portfolio-table" className="hidden overflow-x-auto rounded-xl border border-outline-variant/30 bg-surface sm:block">
+        <table className="w-full text-sm tabular-nums">
+          <thead className="text-left text-[11px] uppercase tracking-wider text-on-surface-variant">
+            <tr className="border-b border-outline-variant/20">
+              <th className="px-4 py-3 font-medium">Title</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Iter</th>
+              <th className="px-4 py-3 font-medium">Spent / Budget</th>
+              <th className="px-4 py-3 font-medium">Last activity</th>
+              <th className="px-4 py-3 font-medium" />
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map((j) => {
+              const statusName = LOOP_JOB_STATUS[j.status] ?? '?';
+              return (
+                <tr key={j.job_contract_address} className="border-b border-outline-variant/10 last:border-0 hover:bg-surface-container-low">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-on-surface">{j.agent_title ?? `Agent #${j.agent_id}`}</div>
+                    <div className="font-mono text-[10px] text-on-surface-variant">{j.job_contract_address.slice(0, 10)}…</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_TINT[statusName] ?? ''}`}>
+                      {statusName}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 font-mono">{j.iterations_done}/{j.max_iterations}</td>
+                  <td className="px-4 py-3 font-mono">${fmtUsdc(j.spent_micro_usdc)} / ${fmtUsdc(j.budget_micro_usdc)}</td>
+                  <td className="px-4 py-3 text-on-surface-variant">{relTime(j.last_iter_completed_at ?? j.created_at)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <Link
+                      href={`/arbloop/job/${j.job_contract_address}`}
+                      className="rounded-full border border-primary/40 bg-primary/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-primary hover:bg-primary/20"
+                    >
+                      Open ↗
+                    </Link>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function BuyerJobCard({ j }: { j: BuyerJobDto }) {
+  const statusName = LOOP_JOB_STATUS[j.status] ?? '?';
+  return (
+    <li className="rounded-xl border border-outline-variant/30 bg-surface p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-on-surface">{j.agent_title ?? `Agent #${j.agent_id}`}</div>
+          <div className="font-mono text-[10px] text-on-surface-variant">{j.job_contract_address.slice(0, 14)}…</div>
+        </div>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_TINT[statusName] ?? ''}`}>
+          {statusName}
+        </span>
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-xs tabular-nums">
+        <div>
+          <dt className="text-[10px] uppercase text-on-surface-variant">Iter</dt>
+          <dd className="font-mono">{j.iterations_done}/{j.max_iterations}</dd>
+        </div>
+        <div>
+          <dt className="text-[10px] uppercase text-on-surface-variant">Spent</dt>
+          <dd className="font-mono">${fmtUsdc(j.spent_micro_usdc)} / ${fmtUsdc(j.budget_micro_usdc)}</dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-[10px] uppercase text-on-surface-variant">Last activity</dt>
+          <dd>{relTime(j.last_iter_completed_at ?? j.created_at)}</dd>
+        </div>
+      </dl>
+      <Link
+        href={`/arbloop/job/${j.job_contract_address}`}
+        className="mt-3 inline-flex w-full items-center justify-center rounded-full border border-primary/40 bg-primary/10 px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-primary hover:bg-primary/20"
+        style={{ minHeight: 44 }}
+      >
+        Open ↗
+      </Link>
+    </li>
+  );
+}
+
+// ─── JobActionBar ──────────────────────────────────────────────────────
+//
+// Pause / Resume / Cancel buttons gated by the current LoopJob status.
+// Each button is ≥44pt tap target (iOS guideline), stacks vertically <sm,
+// inlines >=sm. State-machine guards mirror the on-chain modifiers in
+// LoopJob.sol so a stale UI cannot revert silently.
+
+export interface JobActionBarProps {
+  jobAddress: `0x${string}`;
+  statusName: LoopJobStatusName | null;
+  onAfter?: () => void;
+}
+
+export function JobActionBar({ jobAddress, statusName, onAfter }: JobActionBarProps) {
+  const pause = usePauseJob();
+  const resume = useResumeJob();
+  const cancel = useCancelJob();
+  const [tx, setTx] = useState<`0x${string}` | null>(null);
+
+  const isRunning = statusName === 'RUNNING';
+  const isPaused = statusName === 'PAUSED_BUDGET' || statusName === 'PAUSED_CHECKPOINT';
+  const terminal = statusName === 'DONE' || statusName === 'CANCELLED';
+
+  async function run(action: (a: `0x${string}`) => Promise<`0x${string}` | null>) {
+    const h = await action(jobAddress);
+    if (h) { setTx(h); onAfter?.(); }
+  }
+
+  const pending = pause.isPending || resume.isPending || cancel.isPending;
+
+  if (terminal) {
+    return (
+      <div className="rounded-xl border border-outline-variant/30 bg-surface-container-low p-4 text-sm text-on-surface-variant">
+        Loop is {statusName?.toLowerCase()}. No further actions available.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-xl border border-outline-variant/30 bg-surface p-4">
+      <h3 className="font-headline text-base font-semibold">Controls</h3>
+      <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
+        {isRunning && (
+          <button
+            data-test="action-pause"
+            disabled={pending}
+            onClick={() => run(pause.call)}
+            className="flex-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-600 hover:bg-amber-500/20 disabled:opacity-50"
+            style={{ minHeight: 44 }}
+          >
+            {pause.isPending ? 'Pausing…' : '⏸ Pause'}
+          </button>
+        )}
+        {isPaused && (
+          <button
+            data-test="action-resume"
+            disabled={pending}
+            onClick={() => run(resume.call)}
+            className="flex-1 rounded-full border border-primary/40 bg-primary/10 px-4 py-3 text-sm font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
+            style={{ minHeight: 44 }}
+          >
+            {resume.isPending ? 'Resuming…' : '▶ Resume'}
+          </button>
+        )}
+        <button
+          data-test="action-cancel"
+          disabled={pending}
+          onClick={() => {
+            if (!confirm('Cancel this loop? The unspent budget will be refunded to your wallet.')) return;
+            void run(cancel.call);
+          }}
+          className="flex-1 rounded-full border border-error/40 bg-error/5 px-4 py-3 text-sm font-medium text-error hover:bg-error/10 disabled:opacity-50"
+          style={{ minHeight: 44 }}
+        >
+          {cancel.isPending ? 'Cancelling…' : '✕ Cancel'}
+        </button>
+      </div>
+      {tx && (
+        <p className="font-mono text-[11px] text-on-surface-variant break-all">
+          tx: <a className="text-primary hover:underline" href={`https://sepolia.arbiscan.io/tx/${tx}`} target="_blank" rel="noreferrer">{tx}</a>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── ChangeRequestThread ───────────────────────────────────────────────
+//
+// Off-chain message thread bound to a job. Same component for buyer and
+// seller; direction comes from the row. Server enforces auth via
+// x-wallet-address header (must be buyer or seller of the job).
+
+export interface ChangeRequestThreadProps {
+  jobAddress: string;
+  /** Wallet of the connected user — used to colour their own bubbles. */
+  selfAddress: string | null | undefined;
+}
+
+export function ChangeRequestThread({ jobAddress, selfAddress }: ChangeRequestThreadProps) {
+  const { requests, loading, error, refetch } = useChangeRequests(jobAddress);
+  const { send, sending, error: sendErr } = useSendChangeRequest(jobAddress);
+  const [body, setBody] = useState('');
+  const remaining = 2000 - body.length;
+
+  async function onSend() {
+    const ok = await send(body);
+    if (ok) { setBody(''); refetch(); }
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-outline-variant/30 bg-surface p-4">
+      <h3 className="font-headline text-base font-semibold">Change requests</h3>
+      <ul className="space-y-2 max-h-80 overflow-y-auto" aria-live="polite">
+        {loading && requests.length === 0 && (
+          <li className="text-sm text-on-surface-variant">Loading…</li>
+        )}
+        {!loading && requests.length === 0 && (
+          <li className="text-sm text-on-surface-variant">
+            No messages yet. Send the seller a request — for example, “please use a more formal register”.
+          </li>
+        )}
+        {requests.map((r) => <ChangeRequestBubble key={r.id} r={r} selfAddress={selfAddress} />)}
+      </ul>
+      {error && <p className="text-xs text-amber-500">load: {error}</p>}
+      <div className="space-y-2">
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value.slice(0, 2000))}
+          rows={3}
+          placeholder="Describe what you'd like changed (≤2000 chars)…"
+          className="w-full resize-y rounded border border-outline-variant/40 bg-surface-container-low px-3 py-2 text-base sm:text-sm"
+          style={{ minHeight: 80 }}
+        />
+        <div className="flex items-center justify-between gap-3">
+          <span className={`font-mono text-[11px] ${remaining < 50 ? 'text-amber-500' : 'text-on-surface-variant'}`}>
+            {remaining} chars left
+          </span>
+          <button
+            data-test="change-request-send"
+            disabled={sending || !body.trim()}
+            onClick={onSend}
+            className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-on-primary disabled:opacity-50"
+            style={{ minHeight: 44, minWidth: 88 }}
+          >
+            {sending ? 'Sending…' : 'Send'}
+          </button>
+        </div>
+        {sendErr && <p className="text-xs text-amber-500">send: {sendErr}</p>}
+      </div>
+    </div>
+  );
+}
+
+function ChangeRequestBubble({ r, selfAddress }: { r: ChangeRequestDto; selfAddress: string | null | undefined }) {
+  const mine = !!selfAddress && r.sender_address.toLowerCase() === selfAddress.toLowerCase();
+  const directionLabel = r.direction === 'buyer_to_seller' ? 'Buyer' : 'Seller';
+  return (
+    <li className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+      <div
+        className={`max-w-[85%] sm:max-w-[70%] rounded-2xl px-3 py-2 text-sm ${
+          mine
+            ? 'bg-primary/10 text-on-surface'
+            : 'bg-surface-container-low text-on-surface-variant'
+        }`}
+      >
+        <div className="mb-1 font-mono text-[10px] uppercase opacity-70">
+          {directionLabel} · {relTime(r.created_at)}
+        </div>
+        <p className="whitespace-pre-wrap break-words">{r.body}</p>
+      </div>
+    </li>
+  );
+}

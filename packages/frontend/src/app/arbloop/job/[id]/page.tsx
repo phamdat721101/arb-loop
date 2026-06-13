@@ -1,10 +1,13 @@
 'use client';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { useAccount } from 'wagmi';
 import { useIterationLog, useJobMetadata, useLoopJob } from '@/hooks/useArbLoop';
 import {
+  ChangeRequestThread,
   CheckpointGate,
   IterationReceiptList,
+  JobActionBar,
   JobDashboard,
   MemoryTraceViewer,
 } from '@/components/arbloop';
@@ -12,6 +15,7 @@ import {
 export default function JobPage() {
   const params = useParams<{ id: string }>();
   const jobAddress = (params.id ?? '') as `0x${string}`;
+  const { address } = useAccount();
   const meta = useJobMetadata(jobAddress);
   const job = useLoopJob(jobAddress);
   const { log } = useIterationLog(jobAddress);
@@ -42,6 +46,14 @@ export default function JobPage() {
           )}
         </div>
       </div>
+
+      <section>
+        <JobActionBar jobAddress={jobAddress} statusName={job.statusName} />
+      </section>
+
+      <section>
+        <ChangeRequestThread jobAddress={jobAddress} selfAddress={address ?? null} />
+      </section>
 
       <section>
         <h3 className="font-headline text-lg font-semibold mb-3">Memory trace</h3>
