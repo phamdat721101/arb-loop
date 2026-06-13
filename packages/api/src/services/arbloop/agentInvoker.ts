@@ -81,6 +81,12 @@ export interface InvokeAgentResult {
   responseDigestSha256: `0x${string}`;
   /** ms in runner memory; metric for the ≤30s cleartext window invariant. */
   runnerMemoryMs: number;
+  /** Plaintext response, set ONLY when the encrypt-then-IPFS pipeline could
+   *  not run (e.g. PINATA_JWT or ARBLOOP_FHENIX_GATEWAY_URL not configured).
+   *  Lets the buyer get their paid-for answer back as graceful degradation
+   *  while the privacy infra is being rolled out. The encrypted path stays
+   *  authoritative whenever it succeeds. */
+  responseText?: string;
 }
 
 export interface AgentInvokerDeps {
@@ -151,25 +157,46 @@ export class AgentInvoker {
     // 8. AES-encrypt response with fresh key.
     const enc = aesGcmEncryptServer(responseBytes);
 
-    // 9. Upload to IPFS.
-    log('arbloop:invoke:ipfs_put');
-    const responseCid = await this.deps.pinata.put(enc.ciphertext, `arbloop-${args.agentId}-${args.jobNonce}.bin`);
-    log('arbloop:invoke:ipfs_put_done', { cid: responseCid });
+    // 9-10. Try the encrypt-then-IPFS pipeline. When the privacy infra
+    //       (PINATA_JWT, ARBLOOP_FHENIX_GATEWAY_URL) is configured this
+    //       is the authoritative path. When it is not, fall back to
+    //       returning plaintext inline so the buyer who already paid
+    //       still gets their answer instead of a 500. The encrypted
+    //       fields are zeroed out in the fallback so downstream code
+    //       can detect the mode by checking responseCid !== ''.
+    let responseCid = '';
+    let encResponseHandle: `0x${string}` = '0x';
+    let encResponseProof: `0x${string}` = '0x';
+    let responseIv: `0x${string}` = '0x';
+    let inlineText: string | undefined;
+    try {
+      log('arbloop:invoke:ipfs_put');
+      responseCid = await this.deps.pinata.put(enc.ciphertext, `arbloop-${args.agentId}-${args.jobNonce}.bin`);
+      log('arbloop:invoke:ipfs_put_done', { cid: responseCid });
 
-    // 10. FHE-encrypt the response AES key for the buyer.
-    const valueHex = ('0x' + Buffer.from(enc.key).toString('hex')) as `0x${string}`;
-    const encKey = await this.deps.fhe.encryptForAddress({
-      valueHex,
-      recipient: args.buyerAddress,
-      contractAddr: args.contextV2Address,
-    });
+      const valueHex = ('0x' + Buffer.from(enc.key).toString('hex')) as `0x${string}`;
+      const encKey = await this.deps.fhe.encryptForAddress({
+        valueHex,
+        recipient: args.buyerAddress,
+        contractAddr: args.contextV2Address,
+      });
+      encResponseHandle = encKey.handle;
+      encResponseProof = encKey.inputProof;
+      responseIv = ('0x' + Buffer.from(enc.iv).toString('hex')) as `0x${string}`;
+    } catch (e) {
+      // Privacy-infra unavailable → graceful degradation, plaintext inline.
+      log('arbloop:invoke:plaintext_fallback', {
+        reason: String((e as Error).message ?? e).slice(0, 160),
+      });
+      inlineText = responseText;
+    }
 
     // 11. Compute response digest for receipt.
     const crypto = await import('node:crypto');
     const digest = ('0x' + crypto.createHash('sha256').update(responseBytes).digest('hex')) as `0x${string}`;
 
     const ms = Date.now() - t0;
-    log('arbloop:invoke:done', { ms, response_cid: responseCid });
+    log('arbloop:invoke:done', { ms, response_cid: responseCid, mode: inlineText ? 'plaintext' : 'encrypted' });
 
     if (ms > 30_000) {
       // Soft alarm — invariant says runner memory cleartext ≤30s.
@@ -178,11 +205,12 @@ export class AgentInvoker {
 
     return {
       responseCid,
-      encResponseHandle: encKey.handle,
-      encResponseProof: encKey.inputProof,
-      responseIv: ('0x' + Buffer.from(enc.iv).toString('hex')) as `0x${string}`,
+      encResponseHandle,
+      encResponseProof,
+      responseIv,
       responseDigestSha256: digest,
       runnerMemoryMs: ms,
+      responseText: inlineText,
     };
   }
 }

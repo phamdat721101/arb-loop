@@ -694,6 +694,10 @@ router.post('/agents/:agentId/invoke', x402Middleware(), async (req: Request, re
       response_digest_sha256: out.responseDigestSha256,
       runner_memory_ms: out.runnerMemoryMs,
       settlement_tx: settlement.txHash,
+      // Plaintext fallback for buyers when the encrypt-then-IPFS path
+      // could not run (privacy infra not yet configured). Set only in
+      // that case; encrypted-mode responses omit this field.
+      text_response: out.responseText,
     });
   } catch (e) {
     res.status(500).json({ error: 'invoke_failed', detail: String(e) });

@@ -98,11 +98,30 @@ export class FheGateway {
 }
 
 export function loadFheGatewayFromEnv(): FheGateway {
-  const url = process.env.ARBLOOP_FHENIX_GATEWAY_URL;
-  const runnerKey = process.env.ARBLOOP_RUNNER_PRIVATE_KEY ?? process.env.RELAYER_PRIVATE_KEY;
-  if (!url) throw new Error('fheGateway:env:ARBLOOP_FHENIX_GATEWAY_URL_required');
-  if (!runnerKey) throw new Error('fheGateway:env:ARBLOOP_RUNNER_PRIVATE_KEY_required');
-  return new FheGateway({ url, runnerPrivateKey: runnerKey });
+  // Lazy proxy: validate env + construct only when a method is actually
+  // called. The Fhenix gateway is needed ONLY for the encrypted-file
+  // input path (agentInvoker steps 3-4). Text-only invokes (the common
+  // case for x402 fast-lane translate/summarize tasks) never touch it,
+  // so requiring the env var unconditionally was a fail-eager bug —
+  // missing config would 500 the whole route even when the feature was
+  // unused. Now the failure surface is precise: file uploads fail clean
+  // with the env_required message; text-only flows succeed regardless.
+  let instance: FheGateway | null = null;
+  const ensure = (): FheGateway => {
+    if (instance) return instance;
+    const url = process.env.ARBLOOP_FHENIX_GATEWAY_URL;
+    const runnerKey = process.env.ARBLOOP_RUNNER_PRIVATE_KEY ?? process.env.RELAYER_PRIVATE_KEY;
+    if (!url) throw new Error('fheGateway:env:ARBLOOP_FHENIX_GATEWAY_URL_required');
+    if (!runnerKey) throw new Error('fheGateway:env:ARBLOOP_RUNNER_PRIVATE_KEY_required');
+    instance = new FheGateway({ url, runnerPrivateKey: runnerKey });
+    return instance;
+  };
+  return new Proxy({} as FheGateway, {
+    get(_target, prop) {
+      const v = (ensure() as unknown as Record<PropertyKey, unknown>)[prop];
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(instance) : v;
+    },
+  });
 }
 
 // ─── 2. Pinata IPFS helpers ─────────────────────────────────────────────
@@ -137,9 +156,26 @@ export class PinataClient {
 }
 
 export function loadPinataFromEnv(): PinataClient {
-  const jwt = process.env.PINATA_JWT;
-  if (!jwt) throw new Error('pinata:env:PINATA_JWT_required');
-  return new PinataClient({ jwt, gateway: process.env.PINATA_GATEWAY });
+  // Lazy proxy: same fail-late pattern as loadFheGatewayFromEnv. Pinata
+  // IS called unconditionally today (agentInvoker step 9 uploads the
+  // encrypted response), so a missing PINATA_JWT will still surface for
+  // any real invoke — but the failure happens AT the upload site with
+  // a precise stack, not at module load. This also future-proofs the
+  // codebase against the same fail-eager bug pattern that hit fheGateway.
+  let instance: PinataClient | null = null;
+  const ensure = (): PinataClient => {
+    if (instance) return instance;
+    const jwt = process.env.PINATA_JWT;
+    if (!jwt) throw new Error('pinata:env:PINATA_JWT_required');
+    instance = new PinataClient({ jwt, gateway: process.env.PINATA_GATEWAY });
+    return instance;
+  };
+  return new Proxy({} as PinataClient, {
+    get(_target, prop) {
+      const v = (ensure() as unknown as Record<PropertyKey, unknown>)[prop];
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(instance) : v;
+    },
+  });
 }
 
 // ─── 3. AES-GCM decrypt (server-side, used after gateway decrypt) ───────

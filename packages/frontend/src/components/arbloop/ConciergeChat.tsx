@@ -57,6 +57,9 @@ interface InvokeResult {
   enc_response_handle: `0x${string}`;
   response_iv: `0x${string}`;
   settlement_tx: `0x${string}`;
+  /** Set only when the API ran the plaintext-fallback path (privacy infra
+   *  not yet configured). When present, render directly; skip decrypt. */
+  text_response?: string;
 }
 
 const PLACEHOLDERS = [
@@ -342,12 +345,22 @@ function PayAndExecutePanel({ candidate }: { candidate: Candidate }) {
       {invokeResult && (
         <div className="space-y-2 rounded border border-secondary/30 bg-secondary/5 p-2">
           <p className="text-xs">✓ Settled in tx <code className="font-mono">{invokeResult.settlement_tx.slice(0, 10)}…</code></p>
-          <button
-            onClick={downloadResult}
-            disabled={decrypting}
-            className="w-full rounded-full bg-secondary px-4 py-1.5 text-sm font-medium text-on-primary disabled:opacity-50">
-            {decrypting ? 'Decrypting…' : 'Decrypt & Download'}
-          </button>
+          {invokeResult.text_response ? (
+            // Plaintext-fallback path: privacy infra not yet configured;
+            // render the answer inline so the buyer immediately sees what
+            // they paid for. Encrypted-mode responses fall through to the
+            // Decrypt & Download button.
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-surface px-3 py-2 text-sm">
+              {invokeResult.text_response}
+            </pre>
+          ) : (
+            <button
+              onClick={downloadResult}
+              disabled={decrypting}
+              className="w-full rounded-full bg-secondary px-4 py-1.5 text-sm font-medium text-on-primary disabled:opacity-50">
+              {decrypting ? 'Decrypting…' : 'Decrypt & Download'}
+            </button>
+          )}
         </div>
       )}
     </div>
