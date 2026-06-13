@@ -765,11 +765,11 @@ v3.get('/dashboard/stats', async (_req: Request, res: Response) => {
          UNION ALL
          (SELECT 'arbloop_iter'::text        AS kind,
                  ('arb-job:' || il.job_contract_address)::text AS slug,
-                 j.buyer_address             AS buyer,
+                 COALESCE(j.buyer_address, '') AS buyer,
                  (il.amount_paid_micro_usdc / 1e6)::numeric AS amount_usdc,
-                 il.x402_settlement_tx       AS tx_hash,
+                 COALESCE(il.x402_settlement_tx, '') AS tx_hash,
                  'arbitrum-sepolia'::text    AS network,
-                 il.inference_backend        AS method,
+                 COALESCE(il.inference_backend, 'bedrock') AS method,
                  il.iter_completed_at        AS created_at
             FROM arbloop_iteration_log il
             JOIN arbloop_jobs_metadata j ON j.job_contract_address = il.job_contract_address)

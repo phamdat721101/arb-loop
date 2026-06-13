@@ -27,12 +27,14 @@ interface Stats {
   };
   topSellers: Array<{ seller: string; earned: string; calls: number }>;
   recentReceipts: Array<{
-    slug: string;
-    buyer: string;
-    amount_usdc: string;
-    tx_hash: string;
-    network: string;
-    method: string;
+    /** New in arb-loop merge: 'paid_call' | 'arbloop_x402' | 'arbloop_iter' */
+    kind?: string;
+    slug: string | null;
+    buyer: string | null;
+    amount_usdc: string | null;
+    tx_hash: string | null;
+    network: string | null;
+    method: string | null;
     created_at: string;
   }>;
   walUsdRate?: { usdPerWal: number; cached: boolean; updatedAt: number };
@@ -174,21 +176,34 @@ export default function DashboardPage() {
         ) : (
           <ul className="space-y-2">
             {stats.recentReceipts.map((r, i) => {
-              const url = explorerUrl(r.network, r.tx_hash);
+              // Defensive coercion: server-side UNION across paid_calls,
+              // arbloop_x402_settlements, and arbloop_iteration_log can
+              // include rows where tx_hash / buyer are NULL (e.g. an iter
+              // row whose x402_settlement_tx wasn't persisted by the
+              // chain listener). Treat these as the source of truth, not
+              // a render-time crash.
+              const buyer = String(r.buyer ?? '');
+              const txHash = String(r.tx_hash ?? '');
+              const network = String(r.network ?? '');
+              const method = String(r.method ?? '');
+              const slug = String(r.slug ?? '—');
+              const url = txHash ? explorerUrl(network, txHash) : null;
               return (
                 <li
-                  key={`${r.tx_hash}-${i}`}
+                  key={`${txHash || 'no-tx'}-${i}`}
                   className="flex items-center justify-between gap-4 rounded-lg border border-outline-variant/30 bg-surface px-4 py-2 text-xs"
                 >
                   <div className="flex flex-col gap-0.5">
-                    <span className="font-mono">{r.slug}</span>
+                    <span className="font-mono">{slug}</span>
                     <span className="text-on-surface-variant">
-                      {r.buyer.slice(0, 6)}…{r.buyer.slice(-4)} · {r.network} · {r.method}
+                      {buyer ? `${buyer.slice(0, 6)}…${buyer.slice(-4)}` : '—'}
+                      {network ? ` · ${network}` : ''}
+                      {method ? ` · ${method}` : ''}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 font-mono text-primary">
-                      ${Number(r.amount_usdc).toFixed(4)}
+                      ${Number(r.amount_usdc ?? 0).toFixed(4)}
                     </span>
                     {url ? (
                       <a
@@ -199,8 +214,10 @@ export default function DashboardPage() {
                       >
                         explorer ↗
                       </a>
+                    ) : txHash ? (
+                      <span className="text-on-surface-variant">{txHash.slice(0, 10)}…</span>
                     ) : (
-                      <span className="text-on-surface-variant">{r.tx_hash.slice(0, 10)}…</span>
+                      <span className="text-on-surface-variant">pending</span>
                     )}
                   </div>
                 </li>
