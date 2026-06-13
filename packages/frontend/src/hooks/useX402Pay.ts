@@ -18,17 +18,19 @@
  *
  * SOLID:
  *   - SRP: one hook owns the x402 dance.
- *   - DIP: wagmi's signTypedDataAsync is the only external dependency.
+ *   - DIP: ethers BrowserProvider over Privy EIP-1193 (NOT wagmi).
  */
 
 import { useCallback, useState } from 'react';
-import { useAccount, useSignTypedData } from 'wagmi';
+import { BrowserProvider } from 'ethers';
 import {
   buildEip3009TypedData,
   USDC_DOMAINS,
   type X402Challenge,
 } from '@fhe-ai-context/sdk';
 import { ARBLOOP_API_URL } from '@/lib/arbloop';
+import { usePrivyEvmAddress, usePrivyEvmWallet } from '@/hooks/useActiveWallet';
+import { ARBITRUM_SEPOLIA_CHAIN_ID } from '@/lib/networks';
 
 export interface PayArgs {
   /** Path or absolute URL of the x402 endpoint (e.g. '/v3/arbloop/agents/42/invoke'). */
@@ -47,14 +49,18 @@ export interface PayResult<T> {
 }
 
 export function useX402Pay() {
-  const { address } = useAccount();
-  const { signTypedDataAsync } = useSignTypedData();
+  // Project convention (see arbloop/seller/onboard/page.tsx + chat/[agentId]):
+  // wagmi useSignTypedData lags Privy on first render and silently fails for
+  // Privy embedded wallets. Sign via ethers BrowserProvider over Privy's
+  // EIP-1193 provider instead — works for embedded + external wallets alike.
+  const address = usePrivyEvmAddress();
+  const evmWallet = usePrivyEvmWallet();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastTxHash, setLastTxHash] = useState<`0x${string}` | null>(null);
 
   const pay = useCallback(async <T = unknown>(args: PayArgs): Promise<PayResult<T>> => {
-    if (!address) {
+    if (!address || !evmWallet) {
       const err = 'wallet_not_connected';
       setError(err);
       throw new Error(err);
@@ -83,7 +89,14 @@ export function useX402Pay() {
       const accept = challenge.accepts?.[0];
       if (!accept) throw new Error('x402:no_accept_in_challenge');
 
-      // 3. Build EIP-3009 typed-data.
+      // 3. Ensure the wallet is on the right network so the EIP-712
+      //    domain.chainId matches USDC on Arbitrum Sepolia. Without this,
+      //    Privy embedded wallets refuse to sign with a chain-mismatch error.
+      if (network === 'arbitrum-sepolia') {
+        try { await evmWallet.switchChain(ARBITRUM_SEPOLIA_CHAIN_ID); } catch { /* already there */ }
+      }
+
+      // 4. Build EIP-3009 typed-data.
       const domain = network === 'arbitrum' ? USDC_DOMAINS.arbitrum : USDC_DOMAINS.arbitrumSepolia;
       const td = buildEip3009TypedData({
         domain,
@@ -92,15 +105,16 @@ export function useX402Pay() {
         valueMicroUsdc: BigInt(accept.max_amount_required),
       });
 
-      // 4. Sign.
-      const signature = (await signTypedDataAsync({
-        domain: td.domain,
-        types: { TransferWithAuthorization: td.types.TransferWithAuthorization },
-        primaryType: 'TransferWithAuthorization',
-        message: td.message,
-      } as never)) as `0x${string}`;
+      // 5. Sign via ethers BrowserProvider over the Privy EIP-1193 provider.
+      const provider = await evmWallet.getEthereumProvider();
+      const signer = await new BrowserProvider(provider).getSigner();
+      const signature = (await signer.signTypedData(
+        td.domain,
+        { TransferWithAuthorization: td.types.TransferWithAuthorization },
+        td.message,
+      )) as `0x${string}`;
 
-      // 5. Build X-PAYMENT header.
+      // 6. Build X-PAYMENT header.
       const xPayment = btoa(JSON.stringify({
         x402_version: '1.0',
         scheme: 'exact',
@@ -114,7 +128,7 @@ export function useX402Pay() {
         },
       }));
 
-      // 6. Retry with X-PAYMENT.
+      // 7. Retry with X-PAYMENT.
       const r2 = await fetch(fullUrl, {
         method: 'POST',
         headers: {
@@ -125,7 +139,7 @@ export function useX402Pay() {
       });
       const json = await r2.json().catch(() => ({}));
 
-      // 7. Decode settlement tx from response header (if present).
+      // 8. Decode settlement tx from response header (if present).
       const xpr = r2.headers.get('X-PAYMENT-RESPONSE');
       let settlementTxHash: `0x${string}` | undefined;
       if (xpr) {
@@ -143,7 +157,7 @@ export function useX402Pay() {
     } finally {
       setIsLoading(false);
     }
-  }, [address, signTypedDataAsync]);
+  }, [address, evmWallet]);
 
   return { pay, isLoading, error, lastTxHash };
 }
