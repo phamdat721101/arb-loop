@@ -8,6 +8,7 @@ import {
   CheckpointGate,
   IterationReceiptList,
   JobActionBar,
+  JobChainHistory,
   JobDashboard,
   MemoryTraceViewer,
 } from '@/components/arbloop';
@@ -50,6 +51,10 @@ export default function JobPage() {
 
       <section>
         <JobActionBar jobAddress={jobAddress} statusName={job.statusName} />
+      </section>
+
+      <section>
+        <JobChainHistory jobAddress={jobAddress} />
       </section>
 
       <section>

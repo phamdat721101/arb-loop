@@ -347,6 +347,87 @@ export function explorerTxUrl(txHash: string): string {
   return `${base}/tx/${txHash}`;
 }
 
+// ─── On-chain USDC flow timeline per job ─────────────────────────────────
+//
+// Reads ERC-20 Transfer events on USDC filtered by the LoopJob escrow
+// address — gives a complete timeline of every USDC flow in/out of the
+// job (hire deposit, per-iter 70/25/5 splits, refund). The buyer sees
+// "where my money went"; the seller sees "I already got paid". Two
+// getLogs (in + out) merged + sorted; cheap because USDC indexes
+// from/to as topics.
+//
+// SRP: one read, no caching beyond viem's PublicClient. UI consumers
+// just render the resulting list.
+export interface JobChainEvent {
+  txHash: `0x${string}`;
+  blockNumber: bigint;
+  direction: 'in' | 'out';        // relative to the LoopJob escrow
+  counterparty: `0x${string}`;     // who paid in / who got paid
+  amountMicro: bigint;
+}
+
+export function useJobChainHistory(jobAddress: `0x${string}` | null) {
+  const publicClient = usePublicClient();
+  const usdcAddr = (process.env.NEXT_PUBLIC_ARBLOOP_USDC_ADDRESS
+    ?? '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d') as `0x${string}`;
+  const [events, setEvents] = useState<JobChainEvent[]>([]);
+  useEffect(() => {
+    if (!jobAddress || !publicClient) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const transferEvent = {
+          type: 'event',
+          name: 'Transfer',
+          inputs: [
+            { name: 'from', type: 'address', indexed: true },
+            { name: 'to', type: 'address', indexed: true },
+            { name: 'value', type: 'uint256' },
+          ],
+        } as const;
+        const [outflows, inflows] = await Promise.all([
+          publicClient.getLogs({
+            address: usdcAddr,
+            event: transferEvent,
+            args: { from: jobAddress },
+            fromBlock: 'earliest',
+            toBlock: 'latest',
+          }),
+          publicClient.getLogs({
+            address: usdcAddr,
+            event: transferEvent,
+            args: { to: jobAddress },
+            fromBlock: 'earliest',
+            toBlock: 'latest',
+          }),
+        ]);
+        if (cancelled) return;
+        const merged: JobChainEvent[] = [
+          ...outflows.map((lg) => ({
+            txHash: lg.transactionHash as `0x${string}`,
+            blockNumber: lg.blockNumber,
+            direction: 'out' as const,
+            counterparty: (lg as { args: { to: `0x${string}` } }).args.to,
+            amountMicro: (lg as { args: { value: bigint } }).args.value,
+          })),
+          ...inflows.map((lg) => ({
+            txHash: lg.transactionHash as `0x${string}`,
+            blockNumber: lg.blockNumber,
+            direction: 'in' as const,
+            counterparty: (lg as { args: { from: `0x${string}` } }).args.from,
+            amountMicro: (lg as { args: { value: bigint } }).args.value,
+          })),
+        ].sort((a, b) =>
+          a.blockNumber === b.blockNumber ? 0 : a.blockNumber < b.blockNumber ? -1 : 1,
+        );
+        setEvents(merged);
+      } catch { /* RPC may rate-limit getLogs from earliest; UI degrades to empty */ }
+    })();
+    return () => { cancelled = true; };
+  }, [jobAddress, publicClient, usdcAddr]);
+  return events;
+}
+
 // ─── Iteration log (DB-backed, off-chain summary) ────────────────────────
 
 export function useIterationLog(jobAddress: string | null) {

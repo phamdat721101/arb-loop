@@ -507,7 +507,9 @@ import {
   useChangeRequests,
   useSendChangeRequest,
   useSellerJobs,
+  useJobChainHistory,
   type ChangeRequestDto,
+  type JobChainEvent,
 } from '@/hooks/useArbLoop';
 import { LOOP_JOB_STATUS, type BuyerJobDto, type SellerJobDto } from '@/lib/arbloop';
 
@@ -759,9 +761,18 @@ export function SellerHiresPanel({ sellerAddress }: { sellerAddress: `0x${string
                       <td className="px-4 py-3 text-right">
                         <Link
                           href={`/arbloop/job/${j.job_contract_address}`}
-                          className="rounded-full border border-primary/40 bg-primary/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-primary hover:bg-primary/20"
+                          className={`rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-wider ${
+                            statusName === 'DONE'
+                              ? 'border-secondary/40 bg-secondary/10 text-secondary hover:bg-secondary/20'
+                              : 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20'
+                          }`}
+                          title={
+                            statusName === 'DONE'
+                              ? 'Job complete — your 70% was paid inline per iter via advanceIterWithSplit. Click to view payout txs on Arbiscan.'
+                              : 'Open job page'
+                          }
                         >
-                          Open ↗
+                          {statusName === 'DONE' ? 'Claim & verify ↗' : 'Open ↗'}
                         </Link>
                       </td>
                     </tr>
@@ -802,12 +813,112 @@ function SellerHireCard({ j }: { j: SellerJobDto }) {
       </dl>
       <Link
         href={`/arbloop/job/${j.job_contract_address}`}
-        className="mt-3 inline-flex w-full items-center justify-center rounded-full border border-primary/40 bg-primary/10 px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-primary hover:bg-primary/20"
+        className={`mt-3 inline-flex w-full items-center justify-center rounded-full border px-3 py-2 font-mono text-[11px] uppercase tracking-wider ${
+          statusName === 'DONE'
+            ? 'border-secondary/40 bg-secondary/10 text-secondary hover:bg-secondary/20'
+            : 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20'
+        }`}
         style={{ minHeight: 44 }}
       >
-        Open ↗
+        {statusName === 'DONE' ? 'Claim & verify ↗' : 'Open ↗'}
       </Link>
     </li>
+  );
+}
+
+// ─── JobChainHistory ───────────────────────────────────────────────────
+//
+// On-chain USDC flow timeline for a single job: hire deposit, per-iter
+// settlement splits, refund. Each row deeplinks to Arbiscan so buyer +
+// seller both have the public-chain proof of where every dollar moved.
+// Empty state when the RPC rate-limits getLogs (graceful degradation).
+
+export function JobChainHistory({ jobAddress }: { jobAddress: `0x${string}` }) {
+  const events = useJobChainHistory(jobAddress);
+  // Per-network explorer base — same env knob the action bar uses, so
+  // switching to mainnet is a single env-var change.
+  const explorerBase =
+    (process.env.NEXT_PUBLIC_ARBLOOP_NETWORK ?? 'arbitrum-sepolia') === 'arbitrum'
+      ? 'https://arbiscan.io'
+      : 'https://sepolia.arbiscan.io';
+  // Heuristic labels: first inflow = HIRE; outflows during a RUNNING job
+  // = settlement legs of advanceIterWithSplit (3 per iter); a final
+  // outflow back to the job's buyer (when present) = REFUND. The label
+  // is just a hint — the user clicks through to Arbiscan for the full
+  // call data and 70/25/5 trace.
+  function labelFor(ev: JobChainEvent, idx: number): string {
+    if (ev.direction === 'in') return idx === 0 ? 'Hire deposit' : 'Top-up';
+    return 'Settlement leg';
+  }
+  return (
+    <section
+      data-test="job-chain-history"
+      className="space-y-3 rounded-xl border border-outline-variant/30 bg-surface p-4"
+    >
+      <header className="flex items-center justify-between gap-3">
+        <h3 className="font-headline text-base font-semibold">On-chain history</h3>
+        <a
+          href={`${explorerBase}/address/${jobAddress}`}
+          target="_blank"
+          rel="noreferrer"
+          className="font-mono text-[11px] text-primary hover:underline"
+          title="Open the LoopJob escrow on Arbiscan to see every call + ERC-20 trace"
+        >
+          escrow ↗
+        </a>
+      </header>
+      {events.length === 0 ? (
+        <p className="text-sm text-on-surface-variant">
+          No on-chain transfers yet — or the RPC rate-limited the log scan.
+          Open the escrow address above to view directly on Arbiscan.
+        </p>
+      ) : (
+        <ol className="space-y-2 text-sm">
+          {events.map((ev, idx) => {
+            const usdc = (Number(ev.amountMicro) / 1e6).toFixed(2);
+            const arrow = ev.direction === 'in' ? '↘' : '↗';
+            return (
+              <li
+                key={`${ev.txHash}-${idx}`}
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded border border-outline-variant/20 bg-surface-container-low px-3 py-2"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                      ev.direction === 'in'
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-secondary/10 text-secondary'
+                    }`}
+                  >
+                    {arrow} {labelFor(ev, idx)}
+                  </span>
+                  <span className="font-mono text-xs tabular-nums">${usdc}</span>
+                </div>
+                <div className="flex items-center gap-2 text-[11px] text-on-surface-variant">
+                  <a
+                    href={`${explorerBase}/address/${ev.counterparty}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono hover:text-primary hover:underline"
+                    title={ev.direction === 'in' ? 'Payer' : 'Recipient'}
+                  >
+                    {ev.direction === 'in' ? 'from' : 'to'} {ev.counterparty.slice(0, 8)}…
+                  </a>
+                  <a
+                    href={`${explorerBase}/tx/${ev.txHash}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono text-primary hover:underline"
+                  >
+                    tx ↗
+                  </a>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }
 
