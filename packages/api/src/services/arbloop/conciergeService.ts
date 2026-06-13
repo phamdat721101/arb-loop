@@ -136,22 +136,32 @@ export async function conciergeSearch(args: {
   // candidates; we re-query for the columns needed for mode derivation.
   const candidates: ConciergeCandidate[] = [];
   for (const c of raw.candidates ?? []) {
+    // Cross-source filter: discoveryService searches both knowledge-brain
+    // agents (UUID ids) and arb-loop agents (numeric on-chain ids). Only
+    // arb-loop agents can be invoked at /v3/arbloop/agents/:agentId/invoke,
+    // and the path param must parse as a non-negative integer. A UUID-shaped
+    // id makes Number() return NaN, which then yields the on-chain
+    // 'bad_agent_id' 400 the buyer sees in the chat. Skip anything that is
+    // not a real arb-loop row.
+    const numericId = Number(c.agent_id);
+    if (!Number.isInteger(numericId) || numericId < 0) continue;
     const r = await pool.query(
       `SELECT agent_registry_address, agent_registry_version, max_iter_per_job,
               tags, title, short_description, agent_id
          FROM arbloop_agents_metadata
         WHERE agent_id = $1
         LIMIT 1`,
-      [Number(c.agent_id)],
+      [numericId],
     ).catch(() => ({ rows: [] }));
     const meta = r.rows[0] ?? {};
+    if (meta.agent_id === undefined) continue;
     const mode = deriveMode({
       fallbackMaxIterations: meta.max_iter_per_job ?? 1,
       tags: meta.tags,
       intentNeedsMemory: intent.needs_memory,
     });
     candidates.push({
-      agent_id: String(c.agent_id),
+      agent_id: String(numericId),
       agent_registry_address: meta.agent_registry_address ?? '',
       agent_registry_version: (meta.agent_registry_version ?? 1) as 1 | 2,
       title: meta.title ?? c.persona_summary?.slice(0, 60) ?? `Agent ${c.agent_id}`,
@@ -163,6 +173,68 @@ export async function conciergeSearch(args: {
       persona_summary: c.persona_summary,
       chain: c.chain ?? '',
     });
+  }
+
+  // Direct arb-loop fallback. The legacy discoveryService indexes only the
+  // brain `agents` table; many chat queries (e.g. "translate text") only
+  // match brain rows, get filtered out above for not being arb-loop, and
+  // the chat shows zero results. This fallback runs a Postgres full-text
+  // match over title + short_description + tags so the chat surfaces real,
+  // invokable arb-loop agents whenever the legacy path misses. We use the
+  // raw user message (not intent.capability) because parseIntent falls back
+  // to capability='other' when the LLM key is missing; 'other' would never
+  // match a real agent's metadata.
+  if (candidates.length === 0) {
+    // Build an OR-join tsquery from the user's words. websearch_to_tsquery
+    // uses AND, which fails on phrases like "translate text" when no agent
+    // contains both words. Sanitize to alphanumerics + lowercase + min 3
+    // chars; OR-join with ' | '. If nothing remains (e.g. emoji-only input),
+    // skip the fallback.
+    const words = (args.message ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3)
+      .slice(0, 6);
+    const tsQuery = words.join(' | ');
+    const rs = tsQuery
+      ? await pool.query(
+          `SELECT agent_id, agent_registry_address, agent_registry_version,
+                  max_iter_per_job, tags, title, short_description,
+                  per_iter_default_micro_usdc
+             FROM arbloop_agents_metadata
+            WHERE revoked = FALSE
+              AND to_tsvector(
+                    'simple',
+                    coalesce(title, '') || ' ' ||
+                    coalesce(short_description, '') || ' ' ||
+                    array_to_string(coalesce(tags, '{}'::text[]), ' ')
+                  ) @@ to_tsquery('simple', $1)
+            ORDER BY published_at DESC
+            LIMIT 5`,
+          [tsQuery],
+        ).catch(() => ({ rows: [] }))
+      : { rows: [] };
+    for (const meta of rs.rows) {
+      const mode = deriveMode({
+        fallbackMaxIterations: meta.max_iter_per_job ?? 1,
+        tags: meta.tags,
+        intentNeedsMemory: intent.needs_memory,
+      });
+      candidates.push({
+        agent_id: String(meta.agent_id),
+        agent_registry_address: meta.agent_registry_address ?? '',
+        agent_registry_version: (meta.agent_registry_version ?? 1) as 1 | 2,
+        title: meta.title ?? `Agent ${meta.agent_id}`,
+        short_description: meta.short_description ?? null,
+        score: 0.5,
+        reason: `arb-loop match: ${meta.title}`,
+        mode,
+        pricing: { x402: String(meta.per_iter_default_micro_usdc ?? ''), mpp: null, fherc20: null },
+        persona_summary: meta.short_description ?? undefined,
+        chain: 'arbitrum-sepolia',
+      });
+    }
   }
 
   // F6: persist for the reflexive loop.
