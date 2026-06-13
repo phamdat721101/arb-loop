@@ -238,10 +238,16 @@ export async function settleAuthorization(args: {
   return { txHash: rc.hash as `0x${string}` };
 }
 
-/** USDC EIP-712 domains (Circle canonical). */
+/** USDC EIP-712 domains (Circle canonical).
+ *  These MUST mirror the on-chain `name()` / `version()` of FiatTokenV2 at
+ *  `verifyingContract`. Any mismatch produces a domain-separator mismatch
+ *  and the contract reverts with "FiatTokenV2: invalid signature" during
+ *  transferWithAuthorization. Verified from chain:
+ *    cast call <usdc> "name()(string)" --rpc-url <rpc>
+ */
 export const USDC_DOMAINS = {
   arbitrumSepolia: {
-    name: 'USDC',
+    name: 'USD Coin',
     version: '2',
     chainId: 421614,
     verifyingContract: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d' as `0x${string}`,
