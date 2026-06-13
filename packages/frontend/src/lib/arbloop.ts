@@ -88,6 +88,14 @@ export const LOOP_JOB_ABI = [
   { type: 'function', name: 'pause', stateMutability: 'nonpayable', inputs: [], outputs: [] },
   { type: 'function', name: 'resume', stateMutability: 'nonpayable', inputs: [], outputs: [] },
   { type: 'function', name: 'cancel', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  {
+    type: 'event', name: 'IterAdvanced',
+    inputs: [
+      { name: 'iterN', type: 'uint256', indexed: true },
+      { name: 'attestationUid', type: 'bytes32' },
+      { name: 'newSpentMicroUsdc', type: 'uint256' },
+    ],
+  },
 ] as const;
 
 export const CHECKPOINT_APPROVAL_ABI = [

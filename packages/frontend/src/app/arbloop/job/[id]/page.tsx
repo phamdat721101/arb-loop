@@ -2,7 +2,7 @@
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAccount } from 'wagmi';
-import { useIterationLog, useJobMetadata, useLoopJob } from '@/hooks/useArbLoop';
+import { useIterationLog, useIterationTxs, useJobMetadata, useLoopJob } from '@/hooks/useArbLoop';
 import {
   ChangeRequestThread,
   CheckpointGate,
@@ -19,6 +19,7 @@ export default function JobPage() {
   const meta = useJobMetadata(jobAddress);
   const job = useLoopJob(jobAddress);
   const { log } = useIterationLog(jobAddress);
+  const txByIter = useIterationTxs(jobAddress);
 
   const showCheckpoint = job.statusName === 'PAUSED_CHECKPOINT';
   const nextIter = job.iterationsDone;
@@ -40,7 +41,7 @@ export default function JobPage() {
         />
         <div className="space-y-3 rounded-xl border border-outline-variant/30 bg-surface p-6">
           <h3 className="font-headline text-lg font-semibold">Iterations</h3>
-          <IterationReceiptList log={log} />
+          <IterationReceiptList log={log} txByIter={txByIter} />
           {showCheckpoint && nextIter > 0 && (
             <CheckpointGate jobAddress={jobAddress} iterN={nextIter} />
           )}

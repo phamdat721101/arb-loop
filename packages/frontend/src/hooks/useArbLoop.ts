@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { useAccount, useReadContract, useWriteContract } from 'wagmi';
+import { useAccount, usePublicClient, useReadContract, useWriteContract } from 'wagmi';
 import {
   ARBLOOP_ADDRESSES,
   ARBLOOP_API_URL,
@@ -289,6 +289,62 @@ export function useLoopJob(jobAddress: `0x${string}` | null) {
     budgetMicroUsdc: budget.data ?? 0n,
     isLoading: status.isLoading || iter.isLoading,
   };
+}
+
+// ─── On-chain settlement tx hashes per iter ──────────────────────────────
+//
+// On-chain truth: every iter advance for mode-B (loop hire) emits
+// `IterAdvanced(uint256 iterN, bytes32 attestationUid, uint256 newSpentMicroUsdc)`
+// from the LoopJob contract. The transactionHash that emitted that event IS
+// the settlement tx (the same call also performs the 70/25/5 USDC split via
+// `advanceIterWithSplit`). We read it directly from the chain rather than
+// caching in DB so the link is always trustworthy and we never have a
+// backfill problem for older rows.
+//
+// SRP: this hook owns one read — Map<iterN, txHash>. UI components consume.
+// Cost: one viem getLogs per mount (the cache is wagmi's PublicClient).
+export function useIterationTxs(jobAddress: `0x${string}` | null) {
+  const publicClient = usePublicClient();
+  const [txByIter, setTxByIter] = useState<Record<number, `0x${string}`>>({});
+  useEffect(() => {
+    if (!jobAddress || !publicClient) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const logs = await publicClient.getLogs({
+          address: jobAddress,
+          event: {
+            type: 'event',
+            name: 'IterAdvanced',
+            inputs: [
+              { name: 'iterN', type: 'uint256', indexed: true },
+              { name: 'attestationUid', type: 'bytes32' },
+              { name: 'newSpentMicroUsdc', type: 'uint256' },
+            ],
+          },
+          fromBlock: 'earliest',
+          toBlock: 'latest',
+        });
+        if (cancelled) return;
+        const next: Record<number, `0x${string}`> = {};
+        for (const lg of logs) {
+          const iterN = Number((lg as { args: { iterN: bigint } }).args.iterN);
+          if (!Number.isFinite(iterN)) continue;
+          next[iterN] = lg.transactionHash as `0x${string}`;
+        }
+        setTxByIter(next);
+      } catch { /* RPC may be flaky; fall back to no-link UX */ }
+    })();
+    return () => { cancelled = true; };
+  }, [jobAddress, publicClient]);
+  return txByIter;
+}
+
+/** Per-network block-explorer base URL — used by tx and address links. */
+export function explorerTxUrl(txHash: string): string {
+  const network = (process.env.NEXT_PUBLIC_ARBLOOP_NETWORK as 'arbitrum' | 'arbitrum-sepolia') ?? 'arbitrum-sepolia';
+  const base = network === 'arbitrum' ? 'https://arbiscan.io' : 'https://sepolia.arbiscan.io';
+  return `${base}/tx/${txHash}`;
 }
 
 // ─── Iteration log (DB-backed, off-chain summary) ────────────────────────

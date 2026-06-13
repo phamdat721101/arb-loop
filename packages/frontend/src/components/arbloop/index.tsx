@@ -314,10 +314,23 @@ export function JobDashboard(p: JobDashboardProps) {
 
 // ─── IterationReceiptList ──────────────────────────────────────────────
 
-export function IterationReceiptList({ log }: { log: IterationLogDto[] }) {
+export function IterationReceiptList({
+  log,
+  txByIter,
+}: {
+  log: IterationLogDto[];
+  /** Optional on-chain settlement tx per iter (from useIterationTxs). */
+  txByIter?: Record<number, `0x${string}`>;
+}) {
   if (log.length === 0) {
     return <p className="text-sm text-on-surface-variant">Running iter 1… result will appear here in ~10–30s.</p>;
   }
+  // Per-network explorer base. Reads NEXT_PUBLIC_ARBLOOP_NETWORK so the link
+  // works on both Sepolia and mainnet without code changes.
+  const explorerBase =
+    (process.env.NEXT_PUBLIC_ARBLOOP_NETWORK ?? 'arbitrum-sepolia') === 'arbitrum'
+      ? 'https://arbiscan.io'
+      : 'https://sepolia.arbiscan.io';
   function downloadAnswer(iterN: number, answer: string) {
     const blob = new Blob([answer], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -328,7 +341,9 @@ export function IterationReceiptList({ log }: { log: IterationLogDto[] }) {
   }
   return (
     <ul className="space-y-3">
-      {log.map((it) => (
+      {log.map((it) => {
+        const settlementTx = txByIter?.[it.iter_n];
+        return (
         <li
           key={it.iter_n}
           className="space-y-2 rounded border border-outline-variant/30 bg-surface-container-low px-3 py-2"
@@ -340,16 +355,30 @@ export function IterationReceiptList({ log }: { log: IterationLogDto[] }) {
                 · {it.inference_backend} · {it.inference_model_id}
               </span>
             </div>
-            {it.attestation_uid && it.attestation_uid !== '00'.repeat(32) && (
-              <a
-                href={`https://arbitrum.easscan.org/attestation/view/${it.attestation_uid}`}
-                target="_blank"
-                rel="noreferrer"
-                className="font-mono text-xs text-primary hover:underline"
-              >
-                EAS ↗
-              </a>
-            )}
+            <div className="flex items-center gap-2">
+              {settlementTx && (
+                <a
+                  href={`${explorerBase}/tx/${settlementTx}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`Settlement tx ${settlementTx}`}
+                  className="font-mono text-xs text-primary hover:underline"
+                  data-test="iter-settlement-tx"
+                >
+                  tx ↗
+                </a>
+              )}
+              {it.attestation_uid && it.attestation_uid !== '00'.repeat(32) && (
+                <a
+                  href={`https://arbitrum.easscan.org/attestation/view/${it.attestation_uid}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-xs text-primary hover:underline"
+                >
+                  EAS ↗
+                </a>
+              )}
+            </div>
           </div>
           {it.answer && (
             <>
@@ -375,7 +404,8 @@ export function IterationReceiptList({ log }: { log: IterationLogDto[] }) {
             </>
           )}
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }
