@@ -8,7 +8,7 @@ import { usePermit } from '@/hooks/usePermit';
 import { PermitManager } from '@/components/PermitManager';
 import { AGENT_BACKEND_URL } from '@/lib/contracts';
 import { useActiveWallet } from '@/hooks/useActiveWallet';
-import { BuyerPortfolio } from '@/components/arbloop';
+import { BuyerPortfolio, SellerHiresPanel } from '@/components/arbloop';
 
 /**
  * Studio page — wraps the inner component in <Suspense> so Next.js can
@@ -221,6 +221,8 @@ function StudioInner() {
       ) : (
         <>
       <EarningsTile userAddress={userAddress} agents={agents} />
+
+      <SellerHiresPanel sellerAddress={userAddress} />
 
       {!hasPermit ? (
         // Onboarding gate: login → permit → create. The PermitManager is the

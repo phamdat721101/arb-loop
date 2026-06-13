@@ -165,6 +165,24 @@ export interface JobMetadataDto {
   completed_at: string | null;
 }
 
+export interface SellerJobDto {
+  job_contract_address: string;
+  agent_id: number;
+  agent_registry_address: string;
+  buyer_address: string;
+  status: number;
+  iterations_done: number;
+  max_iterations: number;
+  spent_micro_usdc: string;
+  budget_micro_usdc: string;
+  earned_micro_usdc: string;
+  created_at: string;
+  last_iter_at: string | null;
+  completed_at: string | null;
+  agent_title: string | null;
+  agent_short_description: string | null;
+}
+
 export interface BuyerJobDto {
   job_contract_address: string;
   agent_id: number;

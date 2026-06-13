@@ -343,42 +343,54 @@ export function IterationReceiptList({
     <ul className="space-y-3">
       {log.map((it) => {
         const settlementTx = txByIter?.[it.iter_n];
+        const paidUsdc = (Number(it.amount_paid_micro_usdc ?? 0) / 1e6).toFixed(2);
         return (
         <li
           key={it.iter_n}
           className="space-y-2 rounded border border-outline-variant/30 bg-surface-container-low px-3 py-2"
         >
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <span className="font-mono text-sm">iter #{it.iter_n}</span>{' '}
               <span className="text-xs text-on-surface-variant">
                 · {it.inference_backend} · {it.inference_model_id}
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              {settlementTx && (
-                <a
-                  href={`${explorerBase}/tx/${settlementTx}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={`Settlement tx ${settlementTx}`}
-                  className="font-mono text-xs text-primary hover:underline"
-                  data-test="iter-settlement-tx"
-                >
-                  tx ↗
-                </a>
-              )}
-              {it.attestation_uid && it.attestation_uid !== '00'.repeat(32) && (
-                <a
-                  href={`https://arbitrum.easscan.org/attestation/view/${it.attestation_uid}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-mono text-xs text-primary hover:underline"
-                >
-                  EAS ↗
-                </a>
-              )}
-            </div>
+            <span
+              className="rounded-full bg-secondary/10 px-2 py-0.5 font-mono text-[11px] text-secondary tabular-nums"
+              title="USDC paid into escrow for this iter; split 70/25/5 to seller / compute / platform"
+            >
+              ${paidUsdc} settled
+            </span>
+          </div>
+          {/* Settlement + attestation row — both deeplink to public chain
+              proof so the buyer can verify where their USDC went, and the
+              seller can verify they got paid. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+            {settlementTx ? (
+              <a
+                href={`${explorerBase}/tx/${settlementTx}`}
+                target="_blank"
+                rel="noreferrer"
+                title={`Settlement tx ${settlementTx} — performs the 70/25/5 USDC split`}
+                className="font-mono text-primary hover:underline"
+                data-test="iter-settlement-tx"
+              >
+                Settlement: {settlementTx.slice(0, 10)}…{settlementTx.slice(-6)} ↗
+              </a>
+            ) : (
+              <span className="font-mono text-on-surface-variant">Settlement: pending…</span>
+            )}
+            {it.attestation_uid && it.attestation_uid !== '00'.repeat(32) && (
+              <a
+                href={`https://arbitrum.easscan.org/attestation/view/${it.attestation_uid}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono text-primary hover:underline"
+              >
+                Attestation: EAS ↗
+              </a>
+            )}
           </div>
           {it.answer && (
             <>
@@ -494,9 +506,10 @@ import {
   useCancelJob,
   useChangeRequests,
   useSendChangeRequest,
+  useSellerJobs,
   type ChangeRequestDto,
 } from '@/hooks/useArbLoop';
-import { LOOP_JOB_STATUS, type BuyerJobDto } from '@/lib/arbloop';
+import { LOOP_JOB_STATUS, type BuyerJobDto, type SellerJobDto } from '@/lib/arbloop';
 
 const STATUS_TINT: Record<string, string> = {
   PENDING: 'bg-surface-container-low text-on-surface-variant',
@@ -638,6 +651,153 @@ function BuyerJobCard({ j }: { j: BuyerJobDto }) {
         <div className="col-span-2">
           <dt className="text-[10px] uppercase text-on-surface-variant">Last activity</dt>
           <dd>{relTime(j.last_iter_completed_at ?? j.created_at)}</dd>
+        </div>
+      </dl>
+      <Link
+        href={`/arbloop/job/${j.job_contract_address}`}
+        className="mt-3 inline-flex w-full items-center justify-center rounded-full border border-primary/40 bg-primary/10 px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-primary hover:bg-primary/20"
+        style={{ minHeight: 44 }}
+      >
+        Open ↗
+      </Link>
+    </li>
+  );
+}
+
+// ─── SellerHiresPanel ──────────────────────────────────────────────────
+//
+// Studio Seller "Hires" view: every job that hired one of this wallet's
+// agents, with earnings already paid (LoopJob.advanceIterWithSplit ships
+// the seller's 70% inline per iter — there is no withdrawal step). The
+// header note tells the seller this explicitly so they don't look for a
+// button. Each row deeplinks to the per-job page where the buyer + seller
+// can see every settlement tx on Arbiscan.
+
+export function SellerHiresPanel({ sellerAddress }: { sellerAddress: `0x${string}` | null | undefined }) {
+  // Cadence mirrors BuyerPortfolio: 5s while any job RUNNING, 30s otherwise.
+  const fast = 5_000;
+  const slow = 30_000;
+  const probe = useSellerJobs(sellerAddress, fast);
+  const anyRunning = probe.jobs.some((j) => LOOP_JOB_STATUS[j.status] === 'RUNNING');
+  const { jobs, loading, error } = useSellerJobs(sellerAddress, anyRunning ? fast : slow);
+
+  const totalEarnedMicro = jobs.reduce((acc, j) => acc + Number(j.earned_micro_usdc ?? 0), 0);
+  const totalEarnedUsdc = (totalEarnedMicro / 1e6).toFixed(2);
+
+  if (!sellerAddress) return null;
+  if (loading && jobs.length === 0) {
+    return <p className="py-8 text-center text-on-surface-variant">Loading hires…</p>;
+  }
+  if (error) {
+    return <p className="py-6 text-center text-amber-500">Could not load: {error}</p>;
+  }
+  return (
+    <section className="space-y-3" data-test="seller-hires-panel">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-headline text-lg font-semibold">Hires</h2>
+          <p className="text-xs text-on-surface-variant">
+            Every loop your agents have run. Each iter pays you 70% directly to your wallet — no manual withdrawal needed.
+          </p>
+        </div>
+        {jobs.length > 0 && (
+          <div
+            className="rounded-full border border-secondary/30 bg-secondary/5 px-3 py-1 text-xs tabular-nums"
+            title="Sum of seller cuts across all your hires (already in your wallet)"
+            data-test="seller-total-earned"
+          >
+            Earned: <span className="font-mono text-secondary">${totalEarnedUsdc}</span>
+          </div>
+        )}
+      </header>
+      {jobs.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-outline-variant/40 bg-surface-container-low p-8 text-center">
+          <p className="text-on-surface-variant">No hires yet.</p>
+          <p className="mt-2 text-xs text-on-surface-variant">
+            When a buyer hires one of your agents, the loop appears here with per-iter settlement proof.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Mobile cards */}
+          <ul className="space-y-3 sm:hidden">
+            {jobs.map((j) => <SellerHireCard key={j.job_contract_address} j={j} />)}
+          </ul>
+          {/* Desktop table */}
+          <div className="hidden overflow-x-auto rounded-xl border border-outline-variant/30 bg-surface sm:block">
+            <table className="w-full text-sm tabular-nums">
+              <thead className="text-left text-[11px] uppercase tracking-wider text-on-surface-variant">
+                <tr className="border-b border-outline-variant/20">
+                  <th className="px-4 py-3 font-medium">Agent</th>
+                  <th className="px-4 py-3 font-medium">Buyer</th>
+                  <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Iter</th>
+                  <th className="px-4 py-3 font-medium">Earned</th>
+                  <th className="px-4 py-3 font-medium">Activity</th>
+                  <th className="px-4 py-3 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {jobs.map((j) => {
+                  const statusName = LOOP_JOB_STATUS[j.status] ?? '?';
+                  const earned = (Number(j.earned_micro_usdc ?? 0) / 1e6).toFixed(2);
+                  return (
+                    <tr key={j.job_contract_address} className="border-b border-outline-variant/10 last:border-0 hover:bg-surface-container-low">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-on-surface">{j.agent_title ?? `Agent #${j.agent_id}`}</div>
+                        <div className="font-mono text-[10px] text-on-surface-variant">{j.job_contract_address.slice(0, 10)}…</div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs">{j.buyer_address.slice(0, 8)}…{j.buyer_address.slice(-4)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_TINT[statusName] ?? ''}`}>
+                          {statusName}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono">{j.iterations_done}/{j.max_iterations}</td>
+                      <td className="px-4 py-3 font-mono text-secondary">${earned}</td>
+                      <td className="px-4 py-3 text-on-surface-variant">{relTime(j.last_iter_at ?? j.created_at)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <Link
+                          href={`/arbloop/job/${j.job_contract_address}`}
+                          className="rounded-full border border-primary/40 bg-primary/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-primary hover:bg-primary/20"
+                        >
+                          Open ↗
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function SellerHireCard({ j }: { j: SellerJobDto }) {
+  const statusName = LOOP_JOB_STATUS[j.status] ?? '?';
+  const earned = (Number(j.earned_micro_usdc ?? 0) / 1e6).toFixed(2);
+  return (
+    <li className="rounded-xl border border-outline-variant/30 bg-surface p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-on-surface">{j.agent_title ?? `Agent #${j.agent_id}`}</div>
+          <div className="font-mono text-[10px] text-on-surface-variant">buyer {j.buyer_address.slice(0, 10)}…</div>
+        </div>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_TINT[statusName] ?? ''}`}>
+          {statusName}
+        </span>
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-xs tabular-nums">
+        <div>
+          <dt className="text-[10px] uppercase text-on-surface-variant">Iter</dt>
+          <dd className="font-mono">{j.iterations_done}/{j.max_iterations}</dd>
+        </div>
+        <div>
+          <dt className="text-[10px] uppercase text-on-surface-variant">Earned</dt>
+          <dd className="font-mono text-secondary">${earned}</dd>
         </div>
       </dl>
       <Link

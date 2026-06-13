@@ -215,6 +215,59 @@ router.get('/buyer/:address/jobs', async (req: Request, res: Response) => {
   }
 });
 
+// ─── GET /v3/arbloop/seller/:address/jobs ────────────────────────────────
+//
+// Studio seller "Hires" panel: every job that hired one of this wallet's
+// published agents, newest first. Earnings are computed in the SQL itself
+// (sum of amount_paid_micro_usdc × seller_bps / 10000 across all iters)
+// so the frontend only needs to format. Default seller_bps = 7000 (70%);
+// per-agent overrides will live in arbloop_agents_metadata.splits later.
+router.get('/seller/:address/jobs', async (req: Request, res: Response) => {
+  try {
+    const seller = String(req.params.address ?? '').toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(seller)) {
+      return res.status(400).json({ error: 'bad_address' });
+    }
+    const limit = Math.min(parseInt(String(req.query.limit ?? '50'), 10) || 50, 200);
+    const r = await pool.query(
+      `SELECT j.job_contract_address,
+              j.agent_id,
+              j.agent_registry_address,
+              j.buyer_address,
+              j.status,
+              j.iterations_done,
+              j.max_iterations,
+              j.spent_micro_usdc,
+              j.budget_micro_usdc,
+              j.created_at,
+              j.last_iter_at,
+              j.completed_at,
+              a.title              AS agent_title,
+              a.short_description  AS agent_short_description,
+              -- Seller's earned cut so far. 70% default; overrideable later
+              -- by reading the job's manifest. Computed on the fly so we
+              -- never store derived state.
+              COALESCE((
+                SELECT SUM((amount_paid_micro_usdc::numeric * 7000) / 10000)::bigint
+                  FROM arbloop_iteration_log il
+                 WHERE il.job_contract_address = j.job_contract_address
+              ), 0)::text          AS earned_micro_usdc
+         FROM arbloop_jobs_metadata j
+         LEFT JOIN arbloop_agents_metadata a
+                ON a.agent_id = j.agent_id
+               AND (a.agent_registry_address = j.agent_registry_address
+                    OR a.agent_registry_address IS NULL)
+        WHERE LOWER(a.seller_address) = $1
+        ORDER BY j.created_at DESC
+        LIMIT $2`,
+      [seller, limit],
+    );
+    res.json({ jobs: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: 'seller_jobs_failed', detail: String(e) });
+  }
+});
+
 // ─── /v3/arbloop/jobs/:address/change-requests (GET, POST) ───────────────
 //
 // Off-chain message thread bound to a job. Auth model: caller proves a

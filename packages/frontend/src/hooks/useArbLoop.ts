@@ -407,13 +407,22 @@ export function useApproveCheckpoint() {
 // Polls /v3/arbloop/buyer/:address/jobs every 5s while any job is RUNNING,
 // every 30s otherwise. The cadence is computed inside the component from
 // the returned rows, then fed back into useFetchJson via opts.intervalMs.
-import type { BuyerJobDto } from '@/lib/arbloop';
+import type { BuyerJobDto, SellerJobDto } from '@/lib/arbloop';
 
 export function useBuyerJobs(buyerAddress: `0x${string}` | null | undefined, intervalMs: number) {
   const url = buyerAddress
     ? `${ARBLOOP_API_URL}/v3/arbloop/buyer/${buyerAddress.toLowerCase()}/jobs`
     : null;
   const r = useFetchJson<{ jobs: BuyerJobDto[] }>(url, { intervalMs });
+  return { jobs: r.data?.jobs ?? [], loading: r.loading, error: r.error, refetch: r.refetch };
+}
+
+// Seller "Hires" portfolio — same shape as useBuyerJobs but with earnings.
+export function useSellerJobs(sellerAddress: `0x${string}` | null | undefined, intervalMs: number) {
+  const url = sellerAddress
+    ? `${ARBLOOP_API_URL}/v3/arbloop/seller/${sellerAddress.toLowerCase()}/jobs`
+    : null;
+  const r = useFetchJson<{ jobs: SellerJobDto[] }>(url, { intervalMs });
   return { jobs: r.data?.jobs ?? [], loading: r.loading, error: r.error, refetch: r.refetch };
 }
 
