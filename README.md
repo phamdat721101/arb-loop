@@ -159,22 +159,31 @@ if (spentMicroUsdc + amountPaidMicro > budgetMicroUsdc) revert BudgetExceeded();
 
 ## Deployed contracts (Arbitrum Sepolia · `chainId 421614`)
 
-Every address below is queryable on Arbiscan. `eth_getCode` returns real bytecode at each — these are not stubs.
+Every address below is queryable on Arbiscan. `eth_getCode` returns real bytecode at each — these are not stubs. The **`sample tx`** column links to one real, recent transaction for every contract that has hosted product activity, so a reader can click through and see the live state.
 
-| Contract | Address | Role |
+### Active in production
+
+| Contract | Address | Sample tx | Role |
+|---|---|---|---|
+| **AgentRegistryV2** | [`0x0d2e2cbE…794a2Adb`](https://sepolia.arbiscan.io/address/0x0d2e2cbE42cc66389f9F09Cd1E9930C0794a2Adb) | [`0x301e90d0…d6d2b5`](https://sepolia.arbiscan.io/tx/0x301e90d0917b9243735ac9eef86a660e8b88bd529f878aa85d44ff6fb4d6d2b5) | Gasless `publishAgentFor` (EIP-712 sig path) |
+| **LoopJobFactory** | [`0x812c0627…4e201c0F`](https://sepolia.arbiscan.io/address/0x812c0627a00968Cb75a96c11D6Fa6C654e201c0F) | [`0xbfc6fac2…20e28`](https://sepolia.arbiscan.io/tx/0xbfc6fac20243c463422763c95d5a35e3896734805139653b077b9c1cc0920e28) | Single-popup loop hire (`createWithPermit2`) |
+| **X402Router** | [`0xC8f67916…ABe942D5`](https://sepolia.arbiscan.io/address/0xC8f67916772bBd3f08195410C94d3F0dABe942D5) | [`0xdbff88d7…420e7`](https://sepolia.arbiscan.io/tx/0xdbff88d74af3aff6cd07ad289fee15e80424b3bb7c782b695290090653a420e7) | x402 fast-lane settlement, 70/25/5 splits |
+| **IterationReceipt** | [`0x34981de7…dd5a6b8`](https://sepolia.arbiscan.io/address/0x34981de755b35A8b5De3D83F5fBEb6724Dd5a6b8) | [`0xae0dc98b…3ce812`](https://sepolia.arbiscan.io/tx/0xae0dc98bb489c85e2321bb719b38db67aef0d242cf46b9f2523ddd84f63ce812) | EAS attestation per iter |
+| **JobMemoryNamespaceFactory** | [`0xAE31b587…ea4624C0`](https://sepolia.arbiscan.io/address/0xAE31b587c66de24111FC816dC44CDED8ea4624C0) | [`0x65b54a4c…009ccb`](https://sepolia.arbiscan.io/tx/0x65b54a4cc426a47f3d4d39fe83f306b74b9e2e5d0bfb48299c78e3d472009ccb) | CREATE2 namespace per `(buyer, seller, agentId, jobNonce)` |
+| **AgentMemoryNamespaceFactory** | [`0x6d8a371F…CA194957`](https://sepolia.arbiscan.io/address/0x6d8a371F6901e39690CCe2cFB04392d7CA194957) | [`0x301e90d0…d6d2b5`](https://sepolia.arbiscan.io/tx/0x301e90d0917b9243735ac9eef86a660e8b88bd529f878aa85d44ff6fb4d6d2b5) | CREATE2 namespace per `(seller, agentId)` (same tx as the publish — composed inline) |
+| AgentRegistry V1 (kept addressable) | [`0xF9b2C1aB…D17033C8`](https://sepolia.arbiscan.io/address/0xF9b2C1aB948D18D4697F5d2d79346B6dD17033C8) | [`0xa9bb84d4…cf76b5`](https://sepolia.arbiscan.io/tx/0xa9bb84d45824fdfbdf3d0de2405f0f9dfb28750fc936b4423c5bded4f0cf76b5) | Heavy v0.1 path, retained for back-compat |
+
+### Deployed, flag-gated (no production txs yet)
+
+| Contract | Address | Status |
 |---|---|---|
-| **AgentRegistryV2** | [`0x0d2e2cbE42cc66389f9F09Cd1E9930C0794a2Adb`](https://sepolia.arbiscan.io/address/0x0d2e2cbE42cc66389f9F09Cd1E9930C0794a2Adb) | Gasless `publishAgentFor` (EIP-712 sig path) |
-| **LoopJobFactory** | [`0x812c0627a00968Cb75a96c11D6Fa6C654e201c0F`](https://sepolia.arbiscan.io/address/0x812c0627a00968Cb75a96c11D6Fa6C654e201c0F) | Single-popup loop hire (`createWithPermit2`) |
-| **X402Router** | [`0xC8f67916772bBd3f08195410C94d3F0dABe942D5`](https://sepolia.arbiscan.io/address/0xC8f67916772bBd3f08195410C94d3F0dABe942D5) | x402 fast-lane settlement, 70/25/5 splits |
-| **IterationReceipt** | [`0x34981de755b35A8b5De3D83F5fBEb6724Dd5a6b8`](https://sepolia.arbiscan.io/address/0x34981de755b35A8b5De3D83F5fBEb6724Dd5a6b8) | EAS attestation per iter |
-| **CheckpointApproval** | [`0x7A5d8B0673BceD93060a08C9ed46f4fe273D5028`](https://sepolia.arbiscan.io/address/0x7A5d8B0673BceD93060a08C9ed46f4fe273D5028) | Human-in-loop checkpoint gate |
-| **AgentMemoryNamespaceFactory** | [`0x6d8a371F6901e39690CCe2cFB04392d7CA194957`](https://sepolia.arbiscan.io/address/0x6d8a371F6901e39690CCe2cFB04392d7CA194957) | CREATE2 namespace per `(seller, agentId)` |
-| **JobMemoryNamespaceFactory** | [`0xAE31b587c66de24111FC816dC44CDED8ea4624C0`](https://sepolia.arbiscan.io/address/0xAE31b587c66de24111FC816dC44CDED8ea4624C0) | CREATE2 namespace per `(buyer, seller, agentId, jobNonce)` |
-| **ConfidentialAIContextV2** | [`0xF5422Bbe873C8d6B1cCA602DB8267Df8d090f3Fe`](https://sepolia.arbiscan.io/address/0xF5422Bbe873C8d6B1cCA602DB8267Df8d090f3Fe) | Per-job AES-key handle storage (Fhenix `euint256`) |
-| **FheLoopMemoryFactory** | [`0xC7a8F8aD5678F8f8d4871863D510C1E7aa9BfA91`](https://sepolia.arbiscan.io/address/0xC7a8F8aD5678F8f8d4871863D510C1E7aa9BfA91) | CREATE2 per-loop FHE memory contracts |
-| AgentRegistry (V1, kept addressable) | [`0xF9b2C1aB948D18D4697F5d2d79346B6dD17033C8`](https://sepolia.arbiscan.io/address/0xF9b2C1aB948D18D4697F5d2d79346B6dD17033C8) | Heavy v0.1 path, retained for back-compat |
+| **CheckpointApproval** | [`0x7A5d8B06…273D5028`](https://sepolia.arbiscan.io/address/0x7A5d8B0673BceD93060a08C9ed46f4fe273D5028) | Idle — no buyer has paused at a checkpoint yet on the live demo |
+| **ConfidentialAIContextV2** | [`0xF5422Bbe…090f3Fe`](https://sepolia.arbiscan.io/address/0xF5422Bbe873C8d6B1cCA602DB8267Df8d090f3Fe) | Idle — Fhenix gateway env not wired in production; runner falls back to plaintext per `agentInvoker.ts` |
+| **FheLoopMemoryFactory** | [`0xC7a8F8aD…aa9BfA91`](https://sepolia.arbiscan.io/address/0xC7a8F8aD5678F8f8d4871863D510C1E7aa9BfA91) | Idle — same Fhenix gating as above; loop memory writes pass through plaintext L1/L2/L4 in `JobMemoryNamespace` |
 
-**External canonicals reused (no fork, no proxy):**
+Flipping `FEATURE_ARBLOOP_FHE_PIPELINE=true` plus setting `ARBLOOP_FHENIX_GATEWAY_URL` activates all three at runtime — no contract redeploy needed.
+
+### External canonicals reused (no fork, no proxy)
 
 | | Address |
 |---|---|
